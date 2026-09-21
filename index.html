@@ -1,29 +1,28 @@
-<!-- PWA 홈 화면 설정: KLUVY -->
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="KLUVY" />
-  <link rel="apple-touch-icon" href="icon-512.png" />
-  <link rel="manifest" href="manifest.json" />
-
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch(console.warn);
-      });
-    }
-  </script>
-
 <!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>이규호 ♥ 이예진 근무표 & 데이트 플래너</title>
+  <title>KLUVY - 규호♥예진 근무표 & 데이트 플래너</title>
 
-  <!-- PWA 홈 화면 설정 -->
+  <!-- PWA 홈 화면 및 단독 앱(Standalone) 설정 -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="규호♥예진" />
+  <meta name="apple-mobile-web-app-title" content="KLUVY" />
+  <meta name="theme-color" content="#ffffff" />
+  <link rel="apple-touch-icon" href="icon-512.png" />
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- 서비스 워커 등록 스크립트 -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch((err) => {
+          console.warn('PWA 서비스 워커 등록 실패:', err);
+        });
+      });
+    }
+  </script>
 
   <!-- 스타일 및 CDN 라이브러리 -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -38,7 +37,6 @@
     }
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     
-    /* 완벽한 상하/좌우 수평 정렬을 위한 고정 높이 그리드 셀 */
     .calendar-cell {
       height: 102px;
       min-height: 102px;
@@ -106,7 +104,7 @@
       </div>
     </div>
 
-    <!-- 스케줄 ON/OFF 토글 필터 (캘린더 셀 표시만 제어) -->
+    <!-- 스케줄 ON/OFF 토글 필터 -->
     <div class="bg-white rounded-2xl p-2.5 shadow-sm border border-slate-200 flex items-center justify-between text-xs">
       <span class="font-bold text-slate-600 text-[11px]"><i class="fa-solid fa-sliders text-indigo-500 mr-1"></i>캘린더 표시 필터:</span>
       <div class="flex items-center space-x-2">
@@ -158,7 +156,7 @@
       <div id="availableDatesList" class="flex flex-wrap gap-1.5"></div>
     </div>
 
-    <!-- 선택 날짜 24시간 타임라인 & 종합 카드 (두 사람 항상 비교 표시) -->
+    <!-- 선택 날짜 24시간 타임라인 & 종합 카드 -->
     <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 space-y-3">
       <div class="flex items-center justify-between">
         <div>
@@ -182,7 +180,7 @@
           <span>24:00</span>
         </div>
         
-        <!-- 규호 타임라인 바 (항상 표시) -->
+        <!-- 규호 타임라인 -->
         <div id="timelineWrapKyuho" class="space-y-1 mb-2.5">
           <div class="flex items-center justify-between text-xs">
             <span class="font-bold text-slate-700 flex items-center gap-1.5">
@@ -195,7 +193,7 @@
           </div>
         </div>
 
-        <!-- 예진 타임라인 바 (항상 표시) -->
+        <!-- 예진 타임라인 -->
         <div id="timelineWrapYejin" class="space-y-1">
           <div class="flex items-center justify-between text-xs">
             <span class="font-bold text-slate-700 flex items-center gap-1.5">
@@ -239,7 +237,7 @@
     </div>
   </main>
 
-  <!-- 1. 일정 수동 편집 모달 (연속 기간 일괄 수정 탭 포함) -->
+  <!-- 1. 일정 수동 편집 모달 -->
   <div id="editModal" class="fixed inset-0 bg-black/50 z-50 flex items-end justify-center hidden">
     <div class="bg-white w-full max-w-md rounded-t-3xl p-5 space-y-3.5 max-h-[92vh] overflow-y-auto shadow-2xl">
       <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
@@ -249,13 +247,11 @@
         </button>
       </div>
 
-      <!-- 단일 날짜 vs 연속 기간 탭 -->
       <div class="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
         <button type="button" id="tabModeSingle" onclick="setEditMode('single')" class="flex-1 py-1.5 rounded-lg bg-white shadow-xs text-indigo-600 transition">선택한 날짜만 수정</button>
         <button type="button" id="tabModeRange" onclick="setEditMode('range')" class="flex-1 py-1.5 rounded-lg text-slate-500 hover:text-slate-700 transition">연속 기간 일괄 수정</button>
       </div>
 
-      <!-- 일괄 기간 선택 박스 -->
       <div id="rangeDatePickerBox" class="hidden bg-indigo-50/80 p-3 rounded-2xl border border-indigo-200 space-y-1.5">
         <span class="text-[11px] font-bold text-indigo-800 flex items-center gap-1">
           <i class="fa-solid fa-calendar-week text-indigo-600"></i> 일괄 적용 기간 설정
@@ -393,10 +389,9 @@
     </div>
   </div>
 
-  <!-- 2. 업로드 모달 (2025~2040년 지원) -->
+  <!-- 2. 업로드 모달 -->
   <div id="uploadModal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center hidden p-4">
     <div class="bg-white w-full max-w-md rounded-3xl p-5 space-y-4 max-h-[88vh] overflow-y-auto shadow-2xl">
-      
       <div class="flex items-center justify-between border-b border-slate-100 pb-3">
         <div>
           <h3 class="font-bold text-base text-slate-800 flex items-center gap-1.5">
@@ -410,7 +405,6 @@
         </button>
       </div>
 
-      <!-- 대상 연/월 선택기 -->
       <div class="bg-slate-50 p-2.5 rounded-2xl border border-slate-200 space-y-1.5">
         <div class="flex justify-between items-center text-[11px] font-bold text-slate-700">
           <span>📅 대상 연/월 선택</span>
@@ -426,7 +420,6 @@
         </div>
       </div>
 
-      <!-- 이규호 근무표 업로드 -->
       <div class="space-y-2 bg-blue-50/60 p-3.5 rounded-2xl border border-blue-200">
         <div class="flex justify-between items-center">
           <span class="text-xs font-bold text-blue-700 flex items-center gap-1.5">
@@ -440,7 +433,6 @@
         <input type="file" id="kyuhoFile" onchange="onFileSelected('kyuho')" accept=".xlsx, .xls, .csv" class="block w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700" />
       </div>
 
-      <!-- 이예진 스케줄 사진 업로드 -->
       <div class="space-y-2 bg-rose-50/60 p-3.5 rounded-2xl border border-rose-200">
         <div class="flex justify-between items-center">
           <span class="text-xs font-bold text-rose-700 flex items-center gap-1.5">
@@ -456,7 +448,6 @@
         </div>
         <input type="file" id="yejinImageFile" onchange="onFileSelected('yejin')" accept="image/*" class="block w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-rose-500 file:text-white hover:file:bg-rose-600" />
         
-        <!-- Gemini AI API 키 설정 -->
         <div class="pt-1">
           <div class="flex items-center justify-between text-[11px]">
             <span class="text-slate-600 font-semibold"><i class="fa-solid fa-wand-magic-sparkles text-indigo-500 mr-1"></i>Gemini AI Vision 자동 인식</span>
@@ -469,7 +460,6 @@
         </div>
       </div>
 
-      <!-- 실시간 클라우드 동기화 -->
       <div class="bg-indigo-50/60 p-3 rounded-2xl border border-indigo-200 space-y-1.5">
         <div class="flex items-center justify-between">
           <span class="text-[11px] font-bold text-indigo-800"><i class="fa-solid fa-rotate text-indigo-600 mr-1"></i>두 사람 실시간 동기화 (Firebase)</span>
@@ -483,7 +473,6 @@
         </div>
       </div>
 
-      <!-- 진행률 표시 창 -->
       <div id="ocrProgressBox" class="hidden space-y-1.5 bg-indigo-50 p-3 rounded-2xl border border-indigo-200">
         <div class="flex justify-between text-xs font-bold text-indigo-700">
           <span id="ocrStatusText">분석 중...</span>
@@ -494,7 +483,6 @@
         </div>
       </div>
 
-      <!-- 간편 텍스트 등록 -->
       <div class="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-1.5">
         <div class="flex justify-between items-center">
           <span class="text-[11px] font-bold text-slate-700">✍️ 간편 텍스트 빠른 등록 (선택)</span>
@@ -555,7 +543,7 @@
     </div>
   </div>
 
-  <!-- 4. 원본 사진 뷰어 모달 (고화질 줌 & 새 창 보기) -->
+  <!-- 4. 원본 사진 뷰어 모달 -->
   <div id="yejinImageModal" class="fixed inset-0 bg-black/85 z-50 flex items-center justify-center hidden p-2 sm:p-4">
     <div class="bg-white w-full max-w-md rounded-3xl p-4 space-y-3 max-h-[95vh] flex flex-col shadow-2xl">
       <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
@@ -597,9 +585,6 @@
   </div>
 
   <script>
-    // =========================================================
-    // 0. 안전 로컬 스토리지 파서 (Crash 방지)
-    // =========================================================
     function safeGetStorage(key, defaultVal) {
       try {
         const item = localStorage.getItem(key);
@@ -619,9 +604,6 @@
       }
     }
 
-    // =========================================================
-    // 1. 한국 표준시(KST) & 주요 해외 체류지 시차 환산 DB
-    // =========================================================
     function getKSTDate() {
       const now = new Date();
       const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -700,9 +682,7 @@
       return stayDestinations.some(d => dest.includes(d));
     }
 
-    // ★ 7월 1~2일 규호 '휴가' 포함 7·8·9·10월 전수 데이터 기본 마스터 DB ★
     const MASTER_SCHEDULE_DB = {
-      // [7월: 1, 2일 규호 휴가 / 12~15일 부산 1-2]
       "2026-07-01": { my: { type: "휴가", start: "", end: "" }, gf: { type: "체류", destination: "방콕", start: "", end: "", isQuickTurn: false, isPureStay: true } },
       "2026-07-02": { my: { type: "휴가", start: "", end: "" }, gf: { type: "체류", destination: "방콕", start: "22:55", end: "06:30", isQuickTurn: false, isInbound: true } },
       "2026-07-03": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "체류", destination: "방콕", start: "", end: "", isQuickTurn: false, isArrivalOnly: true } },
@@ -713,13 +693,11 @@
       "2026-07-23": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "퀵턴", destination: "오사카", start: "19:05", end: "02:15", isQuickTurn: true, isNightTurn: true } },
       "2026-07-24": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
 
-      // [8월: 3~6일 부산 베이스 1-2 패턴]
       "2026-08-03": { my: { type: "-", start: "", end: "" }, gf: { type: "체류", destination: "부산", start: "12:45", end: "20:30", isQuickTurn: false, isStayBase: true } },
       "2026-08-04": { my: { type: "-", start: "", end: "" }, gf: { type: "체류", destination: "부산", start: "11:50", end: "17:05", isQuickTurn: false, isStayBase: true } },
       "2026-08-05": { my: { type: "-", start: "", end: "" }, gf: { type: "체류", destination: "부산", start: "07:55", end: "12:00", isQuickTurn: false, isStayBase: true } },
       "2026-08-06": { my: { type: "-", start: "", end: "" }, gf: { type: "체류", destination: "부산", start: "05:45", end: "07:40", isQuickTurn: false, isInbound: true, isStayBase: true } },
 
-      // [9월 2609.png 실제 반영]
       "2026-09-01": { my: { type: "대휴", start: "", end: "" }, gf: { type: "퀵턴", destination: "오사카", start: "01:30", end: "03:25", isQuickTurn: true, isNightTurn: true } },
       "2026-09-02": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
       "2026-09-03": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "퀵턴", destination: "오키나와", start: "09:00", end: "16:55", isQuickTurn: true } },
@@ -751,7 +729,6 @@
       "2026-09-29": { my: { type: "O", start: "", end: "" }, gf: { type: "TR", destination: "", start: "08:00", end: "17:00", isQuickTurn: false } },
       "2026-09-30": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "퀵턴", destination: "나리타", start: "16:15", end: "00:25", isQuickTurn: true } },
 
-      // [10월 2610.png 실제 반영]
       "2026-10-01": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "SBY", destination: "", start: "11:00", end: "19:00", isQuickTurn: false } },
       "2026-10-02": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
       "2026-10-03": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "퀵턴", destination: "오사카", start: "06:00", end: "13:30", flight: "301/302 ICN-KIX", isQuickTurn: true } },
@@ -786,7 +763,6 @@
     };
 
     let scheduleDB = safeGetStorage('coupleScheduleDB_v28', MASTER_SCHEDULE_DB);
-    // 기존 캐시가 마스터보다 비어있을 경우 마스터 병합
     if (!scheduleDB["2026-07-01"] || scheduleDB["2026-07-01"]?.my?.type !== "휴가" || !scheduleDB["2026-08-03"]) {
       scheduleDB = { ...MASTER_SCHEDULE_DB, ...scheduleDB };
       scheduleDB["2026-07-01"].my = { type: "휴가", start: "", end: "" };
@@ -814,9 +790,6 @@
       "2026-10-03": "개천절", "2026-10-05": "대체공휴일", "2026-10-09": "한글날", "2026-12-25": "성탄절"
     };
 
-    // =========================================================
-    // 2. Firebase 실시간 동기화
-    // =========================================================
     function updateSyncBadge(isSynced) {
       const badge = document.getElementById('syncStatusBadge');
       if (!badge) return;
@@ -948,9 +921,6 @@
       syncToFirebase();
     }
 
-    // =========================================================
-    // 3. D-Day 및 기념일 함수
-    // =========================================================
     function getDiffDays(date1, date2) {
       const utc1 = Date.UTC(date1.getFullYear(), date1.getMonth(), date1.getDate());
       const utc2 = Date.UTC(date2.getFullYear(), date2.getMonth(), date2.getDate());
@@ -988,9 +958,6 @@
       return null;
     }
 
-    // =========================================================
-    // 4. 타임라인 & 캘린더 정밀 렌더링
-    // =========================================================
     function calculateBarPosition(startTime, endTime) {
       const [sh, sm] = startTime.split(':').map(Number);
       let [eh, em] = endTime.split(':').map(Number);
@@ -1085,7 +1052,6 @@
         if (aniv) tagsBox.innerHTML += `<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded-md"><i class="fa-solid fa-star mr-1"></i>${aniv.name}</span>`;
       }
 
-      // 1. 규호 타임라인 (필터 상태와 무관하게 항상 표시)
       const wrapKyuho = document.getElementById('timelineWrapKyuho');
       if (wrapKyuho) {
         wrapKyuho.classList.remove('hidden');
@@ -1111,7 +1077,6 @@
         }
       }
 
-      // 2. 예진 타임라인 (필터 상태와 무관하게 항상 표시)
       const wrapYejin = document.getElementById('timelineWrapYejin');
       if (wrapYejin) {
         wrapYejin.classList.remove('hidden');
@@ -1146,7 +1111,6 @@
         }
       }
 
-      // 3. 데이트 약속 & 개인 약속
       const planBox = document.getElementById('datePlanBox');
       const planTime = document.getElementById('datePlanTime');
       const planNote = document.getElementById('datePlanNote');
@@ -1245,7 +1209,6 @@
         const dutiesWrap = document.createElement('div');
         dutiesWrap.className = 'flex flex-col justify-start items-stretch space-y-1 w-full';
 
-        // 1. 규호 배지 슬롯
         if (showKyuho) {
           const myTag = document.createElement('div');
           myTag.className = 'h-[18px] text-[8.5px] rounded truncate tracking-tight font-bold text-center flex items-center justify-center ';
@@ -1271,7 +1234,6 @@
           }
         }
 
-        // 2. 예진 배지 슬롯
         if (showYejin) {
           const gfTag = document.createElement('div');
           gfTag.className = 'h-[18px] text-[8.5px] rounded truncate tracking-tight font-black shadow-2xs text-center flex items-center justify-center ';
@@ -1308,7 +1270,6 @@
 
           if (!showKyuho && dayData.gf) {
             if (dayData.gf.isArrivalOnly) {
-              // 귀국 당일은 체류지 배지만 나오고 시간대 표기 없음
             } else if (dayData.gf.isPureStay || (dayData.gf.type === '체류' && !dayData.gf.start && !dayData.gf.end)) {
               const loTag = document.createElement('div');
               loTag.className = 'h-[34px] text-[8px] font-black text-rose-600 bg-rose-50/90 border border-rose-200 rounded text-center flex items-center justify-center shadow-2xs tracking-wider';
@@ -1367,9 +1328,6 @@
       renderCalendar();
     }
 
-    // =========================================================
-    // 5. 캘린더 이미지 캡처
-    // =========================================================
     async function captureCalendar() {
       const target = document.getElementById('calendarCaptureArea');
       const btn = document.getElementById('btnCaptureCalendar');
@@ -1403,9 +1361,6 @@
       }
     }
 
-    // =========================================================
-    // 6. 예진 스케줄 원본 사진 뷰어
-    // =========================================================
     async function openYejinImageModal() {
       const mKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
       const modalTitle = document.getElementById('yejinImageModalTitle');
@@ -1524,9 +1479,6 @@
       });
     }
 
-    // =========================================================
-    // 7. 일정 수동 편집 (연속 기간 일괄 수정 모드 지원)
-    // =========================================================
     function toggleScheduleFilter(target) {
       if (target === 'kyuho') {
         showKyuho = !showKyuho;
@@ -1780,9 +1732,6 @@
       }
     }
 
-    // =========================================================
-    // 8. 엑셀 파서 & Gemini AI Vision
-    // =========================================================
     function onFileSelected(who) {
       if (who === 'kyuho') {
         const file = document.getElementById('kyuhoFile').files[0];
@@ -2224,7 +2173,6 @@
                 
                 let rawVal = cell && cell.v !== undefined ? String(cell.v).trim() : '';
 
-                // 분홍색/마젠타 셀 휴가 판정
                 if (!rawVal && cell && cell.s) {
                   const fg = cell.s.fgColor || cell.s.bgColor;
                   if (fg) {
@@ -2272,9 +2220,6 @@
       return { type: val, start: '', end: '' };
     }
 
-    // =========================================================
-    // 9. 기념일 관리
-    // =========================================================
     function openAnniversaryModal() {
       renderCustomAnivList();
       document.getElementById('anniversaryModal').classList.remove('hidden');
@@ -2322,9 +2267,6 @@
       renderCalendar();
     }
 
-    // =========================================================
-    // 10. 초기화 및 즉시 안전 가드 실행
-    // =========================================================
     function initApp() {
       try {
         initYearSelector();
@@ -2335,7 +2277,6 @@
         }
       } catch (err) {
         console.error("초기화 예외 발생 복구:", err);
-        // 에러 발생 시 마스터 데이터로 긴급 렌더링
         scheduleDB = MASTER_SCHEDULE_DB;
         renderCalendar();
       }
