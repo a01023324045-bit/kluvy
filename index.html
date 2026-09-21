@@ -1,0 +1,2349 @@
+<!-- PWA 홈 화면 설정: KLUVY -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="KLUVY" />
+  <link rel="apple-touch-icon" href="icon-512.png" />
+  <link rel="manifest" href="manifest.json" />
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(console.warn);
+      });
+    }
+  </script>
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>이규호 ♥ 이예진 근무표 & 데이트 플래너</title>
+
+  <!-- PWA 홈 화면 설정 -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="규호♥예진" />
+
+  <!-- 스타일 및 CDN 라이브러리 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <style>
+    body { 
+      -webkit-tap-highlight-color: transparent; 
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", Roboto, sans-serif; 
+    }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    
+    /* 완벽한 상하/좌우 수평 정렬을 위한 고정 높이 그리드 셀 */
+    .calendar-cell {
+      height: 102px;
+      min-height: 102px;
+      max-height: 102px;
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen pb-20">
+
+  <!-- 상단 네비게이션 헤더 -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 px-3.5 py-2 shadow-sm">
+    <div class="max-w-md mx-auto">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-1.5 shrink-0 whitespace-nowrap">
+          <span class="text-rose-500 text-base font-black tracking-tight flex items-center">
+            <i class="fa-solid fa-heart mr-1 text-sm"></i>규호♥예진
+          </span>
+          <span id="syncStatusBadge" onclick="manualSyncNow()" class="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-bold border border-slate-200 cursor-pointer flex items-center">
+            동기화 확인 중...
+          </span>
+        </div>
+        
+        <div class="flex items-center space-x-1 shrink-0">
+          <button onclick="captureCalendar()" id="btnCaptureCalendar" class="text-[11px] bg-slate-50 text-slate-700 px-2 py-1 rounded-lg border border-slate-200 font-bold hover:bg-slate-100 transition flex items-center gap-1 shadow-2xs">
+            <i class="fa-solid fa-camera text-indigo-500 text-[10px]"></i>캡처
+          </button>
+          <button onclick="openYejinImageModal()" class="text-[11px] bg-rose-50 text-rose-700 px-2 py-1 rounded-lg border border-rose-200 font-bold hover:bg-rose-100 transition flex items-center gap-1 shadow-2xs">
+            <i class="fa-solid fa-image text-rose-500 text-[10px]"></i>사진
+          </button>
+          <button onclick="openAnniversaryModal()" class="text-[11px] bg-amber-50 text-amber-700 px-2 py-1 rounded-lg border border-amber-200 font-bold hover:bg-amber-100 transition shadow-2xs">
+            <i class="fa-solid fa-cake-candles text-[10px]"></i>
+          </button>
+          <button onclick="openUploadModalForCurrentMonth()" class="text-[11px] bg-indigo-600 text-white px-2.5 py-1 rounded-lg font-bold hover:bg-indigo-700 transition flex items-center gap-1 shadow-xs">
+            <i class="fa-solid fa-cloud-arrow-up text-[10px]"></i><span id="headerUploadBtnText">등록</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between text-[11px] text-slate-500 mt-1.5 pt-1 border-t border-slate-100">
+        <span id="dDayBadge" class="font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100 cursor-pointer text-[10.5px]" onclick="openAnniversaryModal()">
+          D-Day 계산 중...
+        </span>
+        <span class="text-[10px] text-slate-400 font-medium">티웨이항공 & 교대근무 캘린더</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 메인 레이아웃 -->
+  <main class="max-w-md mx-auto p-3 space-y-2.5">
+
+    <!-- 컬러 가이드 범례 -->
+    <div class="bg-white rounded-2xl p-3 shadow-sm border border-slate-200 text-[11px] space-y-1.5">
+      <div class="flex justify-between items-center border-b pb-1.5">
+        <span class="font-bold text-slate-700">🎨 근무 상태별 색상 구분</span>
+        <span class="text-[10px] text-cyan-600 font-bold">퀵턴: CYAN / 체류: 빨강</span>
+      </div>
+      <div class="flex flex-wrap gap-1.5 pt-0.5">
+        <span class="px-2 py-0.5 rounded bg-cyan-50 text-cyan-700 border border-cyan-300 font-black">퀵턴 비행(CYAN)</span>
+        <span class="px-2 py-0.5 rounded bg-rose-50 text-rose-600 border border-rose-300 font-black">체류/L.O(빨강)</span>
+        <span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-300 font-black">OFF/휴가(초록)</span>
+        <span class="px-2 py-0.5 rounded bg-yellow-50 text-yellow-700 border border-yellow-300 font-black">SBY대기(노랑)</span>
+        <span class="px-2 py-0.5 rounded bg-purple-50 text-purple-600 border border-purple-300 font-black">TR훈련(보라)</span>
+        <span class="px-2 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200 font-bold">규호근무(파랑)</span>
+      </div>
+    </div>
+
+    <!-- 스케줄 ON/OFF 토글 필터 (캘린더 셀 표시만 제어) -->
+    <div class="bg-white rounded-2xl p-2.5 shadow-sm border border-slate-200 flex items-center justify-between text-xs">
+      <span class="font-bold text-slate-600 text-[11px]"><i class="fa-solid fa-sliders text-indigo-500 mr-1"></i>캘린더 표시 필터:</span>
+      <div class="flex items-center space-x-2">
+        <button onclick="toggleScheduleFilter('kyuho')" id="filterBtnKyuho" class="px-3 py-1.5 rounded-xl font-bold border transition flex items-center gap-1.5 bg-blue-600 text-white border-blue-600 shadow-xs">
+          <i class="fa-solid fa-user-check text-[10px]"></i> 이규호
+        </button>
+        <button onclick="toggleScheduleFilter('yejin')" id="filterBtnYejin" class="px-3 py-1.5 rounded-xl font-bold border transition flex items-center gap-1.5 bg-rose-500 text-white border-rose-500 shadow-xs">
+          <i class="fa-solid fa-plane text-[10px]"></i> 이예진
+        </button>
+      </div>
+    </div>
+
+    <!-- 월간 캘린더 (캡처 대상 영역) -->
+    <div id="calendarCaptureArea" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="px-4 py-2.5 flex items-center justify-between border-b border-slate-100 bg-slate-50/50">
+        <button onclick="changeMonth(-1)" class="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center text-slate-600 transition">
+          <i class="fa-solid fa-chevron-left text-xs"></i>
+        </button>
+        <div class="text-center">
+          <span id="currentMonthYear" class="text-base font-black text-slate-800 tracking-tight">2026. 09</span>
+        </div>
+        <button onclick="changeMonth(1)" class="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center text-slate-600 transition">
+          <i class="fa-solid fa-chevron-right text-xs"></i>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-7 text-center text-[11px] font-bold py-1.5 bg-slate-50 text-slate-500 border-b border-slate-100">
+        <span class="text-rose-500">일</span>
+        <span>월</span>
+        <span>화</span>
+        <span>수</span>
+        <span>목</span>
+        <span>금</span>
+        <span class="text-blue-600">토</span>
+      </div>
+
+      <div id="calendarGrid" class="grid grid-cols-7 text-xs select-none bg-white"></div>
+    </div>
+
+    <!-- 데이트 추천 요약 공간 -->
+    <div class="bg-gradient-to-r from-rose-50 to-pink-50 rounded-2xl p-3.5 shadow-sm border border-rose-200 space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="font-bold text-rose-700 text-xs flex items-center gap-1.5">
+          <i class="fa-solid fa-wand-magic-sparkles text-rose-500"></i>
+          <span id="availableDateMonthTitle">9월</span> 데이트 추천 & 가능한 날
+        </span>
+        <span class="text-[10px] text-rose-400 font-medium">클릭 시 해당 날짜로 이동</span>
+      </div>
+      <div id="availableDatesList" class="flex flex-wrap gap-1.5"></div>
+    </div>
+
+    <!-- 선택 날짜 24시간 타임라인 & 종합 카드 (두 사람 항상 비교 표시) -->
+    <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 space-y-3">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="flex items-center space-x-2">
+            <i class="fa-regular fa-calendar-check text-indigo-600"></i>
+            <span id="selectedDateTitle" class="font-bold text-slate-800 text-sm">2026년 9월 8일 (화)</span>
+          </div>
+          <div id="selectedDateTags" class="flex flex-wrap gap-1 mt-1"></div>
+        </div>
+        <button onclick="openEditModal(selectedDateKey)" class="text-xs bg-rose-50 text-rose-600 px-3 py-1.5 rounded-xl border border-rose-200 font-bold hover:bg-rose-100 transition">
+          <i class="fa-solid fa-pen-to-square mr-1"></i>일정 / 데이트 기입
+        </button>
+      </div>
+
+      <div class="pt-1">
+        <div class="flex justify-between text-[10px] text-slate-400 mb-1 px-0.5 font-mono">
+          <span>00:00</span>
+          <span>06:00</span>
+          <span>12:00</span>
+          <span>18:00</span>
+          <span>24:00</span>
+        </div>
+        
+        <!-- 규호 타임라인 바 (항상 표시) -->
+        <div id="timelineWrapKyuho" class="space-y-1 mb-2.5">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-bold text-slate-700 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-blue-600"></span>이규호
+            </span>
+            <span id="detailMyShiftText" class="text-slate-600 font-mono text-[11px] font-semibold">-</span>
+          </div>
+          <div class="w-full h-5 bg-slate-100 rounded-md relative overflow-hidden flex items-center border border-slate-200/60">
+            <div id="detailMyBar" class="h-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold absolute rounded transition-all"></div>
+          </div>
+        </div>
+
+        <!-- 예진 타임라인 바 (항상 표시) -->
+        <div id="timelineWrapYejin" class="space-y-1">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-bold text-slate-700 flex items-center gap-1.5">
+              <span class="w-2 h-2 rounded-full bg-rose-500"></span>이예진
+            </span>
+            <span id="detailGfShiftText" class="text-slate-600 font-mono text-[11px] font-semibold">-</span>
+          </div>
+          <div class="w-full h-5 bg-slate-100 rounded-md relative overflow-hidden flex items-center border border-slate-200/60">
+            <div id="detailGfBar" class="h-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold absolute rounded transition-all"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 데이트 및 개인 약속 표시 -->
+      <div class="space-y-2 pt-1">
+        <div id="datePlanBox" class="p-3 bg-rose-50 rounded-xl border border-rose-200 text-xs space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-rose-600 flex items-center gap-1.5">
+              <i class="fa-solid fa-heart"></i> 우리의 데이트 약속
+            </span>
+            <span id="datePlanTime" class="text-rose-600 font-mono text-[11px] font-bold">미정</span>
+          </div>
+          <p id="datePlanNote" class="text-slate-600">등록된 데이트가 없습니다. 우측 상단 버튼을 눌러 데이트를 계획해 보세요!</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="bg-blue-50/60 p-2.5 rounded-xl border border-blue-100">
+            <span class="font-bold text-blue-700 block mb-0.5 flex items-center gap-1">
+              <i class="fa-regular fa-user"></i> 규호 개인약속
+            </span>
+            <span id="detailMyPromise" class="text-slate-600 text-[11px]">없음</span>
+          </div>
+          <div class="bg-pink-50/60 p-2.5 rounded-xl border border-pink-100">
+            <span class="font-bold text-pink-700 block mb-0.5 flex items-center gap-1">
+              <i class="fa-regular fa-user"></i> 예진 개인약속
+            </span>
+            <span id="detailGfPromise" class="text-slate-600 text-[11px]">없음</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 1. 일정 수동 편집 모달 (연속 기간 일괄 수정 탭 포함) -->
+  <div id="editModal" class="fixed inset-0 bg-black/50 z-50 flex items-end justify-center hidden">
+    <div class="bg-white w-full max-w-md rounded-t-3xl p-5 space-y-3.5 max-h-[92vh] overflow-y-auto shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+        <h3 id="modalDateTitle" class="font-bold text-base text-slate-800">근무 및 일정 편집</h3>
+        <button onclick="closeEditModal()" class="text-slate-400 hover:text-slate-600 text-xl">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- 단일 날짜 vs 연속 기간 탭 -->
+      <div class="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
+        <button type="button" id="tabModeSingle" onclick="setEditMode('single')" class="flex-1 py-1.5 rounded-lg bg-white shadow-xs text-indigo-600 transition">선택한 날짜만 수정</button>
+        <button type="button" id="tabModeRange" onclick="setEditMode('range')" class="flex-1 py-1.5 rounded-lg text-slate-500 hover:text-slate-700 transition">연속 기간 일괄 수정</button>
+      </div>
+
+      <!-- 일괄 기간 선택 박스 -->
+      <div id="rangeDatePickerBox" class="hidden bg-indigo-50/80 p-3 rounded-2xl border border-indigo-200 space-y-1.5">
+        <span class="text-[11px] font-bold text-indigo-800 flex items-center gap-1">
+          <i class="fa-solid fa-calendar-week text-indigo-600"></i> 일괄 적용 기간 설정
+        </span>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <span class="text-[10px] text-slate-500 font-semibold">시작일</span>
+            <input type="date" id="inputRangeStart" class="w-full text-xs p-1.5 rounded-lg border border-indigo-200 bg-white" />
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-500 font-semibold">종료일</span>
+            <input type="date" id="inputRangeEnd" class="w-full text-xs p-1.5 rounded-lg border border-indigo-200 bg-white" />
+          </div>
+        </div>
+        <p class="text-[9.5px] text-indigo-600 font-medium">※ 선택하신 기간 내 모든 날짜에 아래 내용이 한 번에 반영됩니다.</p>
+      </div>
+
+      <div class="bg-rose-50/80 p-3.5 rounded-2xl border border-rose-200 space-y-2.5">
+        <label class="block text-xs font-bold text-rose-700 flex items-center gap-1">
+          <i class="fa-solid fa-heart"></i> 우리 둘의 데이트 기입
+        </label>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <span class="text-[10px] text-slate-500 font-medium">시작 시간</span>
+            <input type="time" id="inputDateTimeStart" class="w-full text-xs p-2 rounded-lg border border-rose-300 bg-white" />
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-500 font-medium">종료 시간</span>
+            <input type="time" id="inputDateTimeEnd" class="w-full text-xs p-2 rounded-lg border border-rose-300 bg-white" />
+          </div>
+        </div>
+        <div>
+          <span class="text-[10px] text-slate-500 font-medium">데이트 내용 / 장소</span>
+          <input type="text" id="inputDateMemo" placeholder="예: 18:30 저녁식사 & 산책 💖" class="w-full text-xs p-2 rounded-lg border border-rose-300 bg-white" />
+        </div>
+      </div>
+
+      <div class="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2.5">
+        <label class="block text-xs font-bold text-slate-700 flex items-center gap-1">
+          <i class="fa-solid fa-calendar-plus"></i> 각자의 개인 약속
+        </label>
+        <div>
+          <span class="text-[10px] text-blue-600 font-bold">이규호 개인 약속</span>
+          <input type="text" id="inputMyPromise" placeholder="예: 팀 회식 18:30" class="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white mt-0.5" />
+        </div>
+        <div>
+          <span class="text-[10px] text-rose-600 font-bold">이예진 개인 약속</span>
+          <input type="text" id="inputGfPromise" placeholder="예: 동기 모임 15:00" class="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white mt-0.5" />
+        </div>
+      </div>
+
+      <!-- 규호 근무 수정 -->
+      <div class="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
+        <label class="block text-xs font-bold text-blue-700 flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-blue-600"></span> 이규호 근무 수정
+        </label>
+        <div class="grid grid-cols-3 gap-2">
+          <div>
+            <span class="text-[10px] text-slate-500">근무 형태</span>
+            <select id="selectMyShiftType" onchange="onMyShiftTypeChange()" class="w-full text-xs p-1.5 rounded border border-slate-300 bg-white">
+              <option value="조근">조근 (05~13)</option>
+              <option value="공휴일조근">공휴일조근 (05~09)</option>
+              <option value="석근">석근 (13~21)</option>
+              <option value="석1">석1 (12~20)</option>
+              <option value="일근">일근 (09~18)</option>
+              <option value="O">O (쉬는날)</option>
+              <option value="대휴">대휴 (쉬는날)</option>
+              <option value="휴가">휴가 (쉬는날)</option>
+              <option value="연차">연차 (휴가)</option>
+              <option value="TS-3">TS-3</option>
+              <option value="TS-1">TS-1</option>
+              <option value="연수">연수</option>
+              <option value="기타">기타 (직접입력)</option>
+            </select>
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-500">시작</span>
+            <input type="time" id="inputMyTimeStart" class="w-full text-xs p-1 rounded border border-slate-300 bg-white" />
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-500">종료</span>
+            <input type="time" id="inputMyTimeEnd" class="w-full text-xs p-1 rounded border border-slate-300 bg-white" />
+          </div>
+        </div>
+        <div id="wrapMyCustomShift" class="hidden pt-1">
+          <span class="text-[10px] text-blue-600 font-semibold">규호 직접입력 근무명</span>
+          <input type="text" id="inputMyShiftCustom" placeholder="직접 입력 (예: TS-2, 특근, 세미나)" class="w-full text-xs p-1.5 rounded border border-blue-300 bg-white mt-0.5" />
+        </div>
+      </div>
+
+      <!-- 예진 근무 수정 -->
+      <div class="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
+        <label class="block text-xs font-bold text-rose-700 flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-rose-500"></span> 이예진 근무 수정
+        </label>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <span class="text-[10px] text-slate-500">근무 형태</span>
+            <select id="selectGfShiftType" onchange="onGfShiftTypeChange()" class="w-full text-xs p-1.5 rounded border border-slate-300 bg-white">
+              <option value="퀵턴">퀵턴 비행 (당일왕복 - CYAN)</option>
+              <option value="체류">체류 비행/L.O (스테이 - 빨간색)</option>
+              <option value="OFF">OFF (휴무 - 초록색)</option>
+              <option value="SBY">SBY (자택대기 - 노란색)</option>
+              <option value="ISA">ISA (인천 SBY A - 노란색)</option>
+              <option value="ISD">ISD (인천 SBY D - 노란색)</option>
+              <option value="GSA">GSA (김포 SBY A - 노란색)</option>
+              <option value="TR">TR (훈련 08~17 - 보라색)</option>
+              <option value="기타">기타 (직접입력)</option>
+            </select>
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-500 font-bold text-rose-600">도착지 / 도시명</span>
+            <input type="text" id="inputGfDestination" placeholder="예: 오사카, 다낭, 비슈케크, 부산" class="w-full text-xs p-1 rounded border border-rose-300 bg-white font-bold" />
+          </div>
+        </div>
+        <div id="wrapGfCustomShift" class="hidden pt-1">
+          <span class="text-[10px] text-rose-600 font-semibold">예진 직접입력 근무명</span>
+          <input type="text" id="inputGfShiftCustom" placeholder="직접 입력 (예: 청원휴가, 본사출장)" class="w-full text-xs p-1.5 rounded border border-rose-300 bg-white mt-0.5" />
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <span class="text-[10px] text-slate-500">출근/시작</span>
+            <input type="time" id="inputGfTimeStart" class="w-full text-xs p-1 rounded border border-slate-300 bg-white" />
+          </div>
+          <div>
+            <span class="text-[10px] text-slate-500">퇴근/착륙</span>
+            <input type="time" id="inputGfTimeEnd" class="w-full text-xs p-1 rounded border border-slate-300 bg-white" />
+          </div>
+        </div>
+      </div>
+
+      <button onclick="saveModalChanges()" class="w-full bg-slate-900 text-white text-xs py-3.5 rounded-xl font-bold hover:bg-slate-800 transition shadow-md">
+        저장 완료
+      </button>
+    </div>
+  </div>
+
+  <!-- 2. 업로드 모달 (2025~2040년 지원) -->
+  <div id="uploadModal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-white w-full max-w-md rounded-3xl p-5 space-y-4 max-h-[88vh] overflow-y-auto shadow-2xl">
+      
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div>
+          <h3 class="font-bold text-base text-slate-800 flex items-center gap-1.5">
+            <i class="fa-solid fa-cloud-arrow-up text-indigo-600"></i>
+            <span id="modalTargetMonthTitle" class="text-indigo-600 font-black">2026년 9월</span> 근무표 등록
+          </h3>
+          <span class="text-[10px] text-slate-400">선택한 월에만 안전하게 반영됩니다.</span>
+        </div>
+        <button onclick="closeUploadModal()" class="text-slate-400 hover:text-slate-600 text-xl">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- 대상 연/월 선택기 -->
+      <div class="bg-slate-50 p-2.5 rounded-2xl border border-slate-200 space-y-1.5">
+        <div class="flex justify-between items-center text-[11px] font-bold text-slate-700">
+          <span>📅 대상 연/월 선택</span>
+          <div class="flex space-x-1">
+            <select id="selectUploadYear" onchange="onMonthSelectorChange()" class="p-1 rounded border border-slate-300 bg-white text-xs font-semibold"></select>
+            <select id="selectUploadMonth" onchange="onMonthSelectorChange()" class="p-1 rounded border border-slate-300 bg-white text-xs font-semibold">
+              <option value="1">1월</option><option value="2">2월</option><option value="3">3월</option>
+              <option value="4">4월</option><option value="5">5월</option><option value="6">6월</option>
+              <option value="7">7월</option><option value="8">8월</option><option value="9">9월</option>
+              <option value="10">10월</option><option value="11">11월</option><option value="12">12월</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 이규호 근무표 업로드 -->
+      <div class="space-y-2 bg-blue-50/60 p-3.5 rounded-2xl border border-blue-200">
+        <div class="flex justify-between items-center">
+          <span class="text-xs font-bold text-blue-700 flex items-center gap-1.5">
+            <i class="fa-solid fa-user-gear"></i> 1. 이규호 근무표 (<span class="uploadTargetMonthText">9월</span>)
+          </span>
+          <span id="statusKyuhoMonthCount" class="text-[10px] text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded font-bold">등록됨</span>
+        </div>
+        <div class="text-[10px] text-slate-500 font-mono flex items-center gap-1 bg-white px-2 py-1 rounded border border-blue-100">
+          <i class="fa-solid fa-file-lines text-blue-500"></i> 현재 파일: <span id="kyuhoAppliedFileName" class="font-bold text-slate-700">교대근무표 9월.xlsx</span>
+        </div>
+        <input type="file" id="kyuhoFile" onchange="onFileSelected('kyuho')" accept=".xlsx, .xls, .csv" class="block w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700" />
+      </div>
+
+      <!-- 이예진 스케줄 사진 업로드 -->
+      <div class="space-y-2 bg-rose-50/60 p-3.5 rounded-2xl border border-rose-200">
+        <div class="flex justify-between items-center">
+          <span class="text-xs font-bold text-rose-700 flex items-center gap-1.5">
+            <i class="fa-solid fa-image"></i> 2. 이예진 스케줄 사진 (<span class="uploadTargetMonthText">9월</span>)
+          </span>
+          <span id="statusYejinMonthCount" class="text-[10px] text-rose-600 bg-rose-100 px-1.5 py-0.5 rounded font-bold">등록됨</span>
+        </div>
+        <div class="text-[10px] text-slate-500 font-mono flex items-center justify-between bg-white px-2 py-1 rounded border border-rose-100">
+          <div class="flex items-center gap-1 truncate max-w-[200px]">
+            <i class="fa-solid fa-file-image text-rose-500"></i> <span id="yejinAppliedFileName" class="font-bold text-slate-700 truncate">2609.png</span>
+          </div>
+          <button type="button" onclick="openYejinImageModal()" class="text-[10px] text-rose-600 font-bold underline shrink-0">사진 보기</button>
+        </div>
+        <input type="file" id="yejinImageFile" onchange="onFileSelected('yejin')" accept="image/*" class="block w-full text-xs text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-rose-500 file:text-white hover:file:bg-rose-600" />
+        
+        <!-- Gemini AI API 키 설정 -->
+        <div class="pt-1">
+          <div class="flex items-center justify-between text-[11px]">
+            <span class="text-slate-600 font-semibold"><i class="fa-solid fa-wand-magic-sparkles text-indigo-500 mr-1"></i>Gemini AI Vision 자동 인식</span>
+            <button type="button" onclick="toggleApiKeyInput()" class="text-indigo-600 font-bold underline text-[10px]">설정</button>
+          </div>
+          <div id="apiKeyInputBox" class="mt-1 space-y-1">
+            <input type="password" id="geminiApiKey" onchange="onApiKeyChanged()" placeholder="Google AI Studio 무료 API 키 입력 (AIzaSy...)" class="w-full text-xs p-1.5 rounded border border-slate-300 bg-white" />
+            <p class="text-[9px] text-slate-400">※ 구글 AI Studio 무료 키를 등록하면 사진을 고속 분석합니다.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 실시간 클라우드 동기화 -->
+      <div class="bg-indigo-50/60 p-3 rounded-2xl border border-indigo-200 space-y-1.5">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-bold text-indigo-800"><i class="fa-solid fa-rotate text-indigo-600 mr-1"></i>두 사람 실시간 동기화 (Firebase)</span>
+          <div class="flex items-center space-x-1.5">
+            <button type="button" onclick="manualSyncNow()" class="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded font-bold shadow-2xs">지금 즉시 동기화</button>
+            <button type="button" onclick="toggleCloudSyncInput()" class="text-indigo-600 font-bold underline text-[10px]">설정</button>
+          </div>
+        </div>
+        <div id="cloudSyncInputBox" class="space-y-1 pt-1">
+          <input type="text" id="firebaseDbUrl" onchange="onFirebaseUrlChanged()" oninput="onFirebaseUrlChanged()" placeholder="https://yktable-f14fe-default-rtdb.asia-southeast1.firebasedatabase.app/" class="w-full text-xs p-1.5 rounded border border-indigo-200 bg-white font-mono text-[11px]" />
+        </div>
+      </div>
+
+      <!-- 진행률 표시 창 -->
+      <div id="ocrProgressBox" class="hidden space-y-1.5 bg-indigo-50 p-3 rounded-2xl border border-indigo-200">
+        <div class="flex justify-between text-xs font-bold text-indigo-700">
+          <span id="ocrStatusText">분석 중...</span>
+          <span id="ocrPercent">0%</span>
+        </div>
+        <div class="w-full bg-indigo-200 h-2 rounded-full overflow-hidden">
+          <div id="ocrProgressBar" class="bg-indigo-600 h-full w-0 transition-all duration-300"></div>
+        </div>
+      </div>
+
+      <!-- 간편 텍스트 등록 -->
+      <div class="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-1.5">
+        <div class="flex justify-between items-center">
+          <span class="text-[11px] font-bold text-slate-700">✍️ 간편 텍스트 빠른 등록 (선택)</span>
+          <span class="text-[9px] text-indigo-600 font-semibold">오류 0%</span>
+        </div>
+        <textarea id="quickScheduleInput" rows="2" placeholder="예: 3 오사카, 4-7 다낭, 8 OFF, 10 구마모토, 11 OFF, 12-14 SBY, 15 GSA, 16-18 싱가포르, 19 OFF, 20 SBY, 21 제주, 22-23 SBY, 24 OFF, 25-28 로마, 29-30 OFF, 31 SBY" class="w-full text-xs p-2 rounded-xl border border-slate-300 bg-white focus:outline-none"></textarea>
+      </div>
+
+      <div class="flex space-x-2 pt-1">
+        <button type="button" onclick="clearTargetMonthData()" class="w-1/3 bg-slate-100 text-slate-600 text-xs py-3.5 rounded-xl font-bold hover:bg-slate-200 transition">
+          해당 월 비우기
+        </button>
+        <button type="button" onclick="processUploadFiles()" id="btnStartScan" class="w-2/3 bg-indigo-600 text-white text-xs py-3.5 rounded-xl font-bold hover:bg-indigo-700 transition shadow-md flex items-center justify-center gap-1.5">
+          <i class="fa-solid fa-check"></i> 변경사항 캘린더 반영
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 기념일 모달 -->
+  <div id="anniversaryModal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-white w-full max-w-md rounded-3xl p-5 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="font-bold text-base text-slate-800 flex items-center gap-1.5">
+          <i class="fa-solid fa-cake-candles text-amber-500"></i> 우리의 기념일 & D-Day
+        </h3>
+        <button onclick="closeAnniversaryModal()" class="text-slate-400 hover:text-slate-600 text-xl">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="bg-amber-50 p-3 rounded-2xl border border-amber-200 text-xs space-y-1">
+        <span class="font-bold text-amber-800 block">💖 만난 날: 2025년 12월 23일 (1일)</span>
+        <span id="modalDDayText" class="text-amber-700 font-semibold">계산 중...</span>
+      </div>
+
+      <div class="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
+        <span class="text-xs font-bold text-slate-700 block">기념일 추가 (생일, 결혼기념일 등)</span>
+        <div class="grid grid-cols-2 gap-2">
+          <input type="text" id="customAnivName" placeholder="기념일명 (예: 예진 생일)" class="text-xs p-2 rounded-lg border border-slate-300 bg-white" />
+          <input type="date" id="customAnivDate" class="text-xs p-2 rounded-lg border border-slate-300 bg-white" />
+        </div>
+        <div class="flex items-center space-x-2 pt-0.5">
+          <input type="checkbox" id="customAnivRepeat" checked class="rounded text-rose-500 focus:ring-0" />
+          <label for="customAnivRepeat" class="text-xs font-semibold text-slate-600 cursor-pointer">
+            매년 같은 날짜에 반복 (생일 등)
+          </label>
+        </div>
+        <button onclick="addCustomAnniversary()" class="w-full bg-amber-500 text-white text-xs py-2 rounded-lg font-bold hover:bg-amber-600 transition">
+          기념일 등록
+        </button>
+      </div>
+
+      <div class="space-y-1.5 text-xs">
+        <span class="font-bold text-slate-700 block">등록된 기념일 목록</span>
+        <div id="customList" class="space-y-1 max-h-40 overflow-y-auto"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. 원본 사진 뷰어 모달 (고화질 줌 & 새 창 보기) -->
+  <div id="yejinImageModal" class="fixed inset-0 bg-black/85 z-50 flex items-center justify-center hidden p-2 sm:p-4">
+    <div class="bg-white w-full max-w-md rounded-3xl p-4 space-y-3 max-h-[95vh] flex flex-col shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+        <div>
+          <h3 id="yejinImageModalTitle" class="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+            <i class="fa-solid fa-image text-rose-500"></i> 이예진 원본 스케줄 사진
+          </h3>
+          <span class="text-[10px] text-slate-400">초고화질 원본으로 확대해도 글자가 또렷합니다.</span>
+        </div>
+        <button onclick="closeYejinImageModal()" class="text-slate-400 hover:text-slate-600 text-xl p-1">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="flex items-center justify-between bg-slate-100 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600">
+        <div class="flex items-center space-x-2">
+          <button onclick="zoomImage(0.25)" class="px-2 py-0.5 bg-white rounded border border-slate-200 hover:bg-slate-50"><i class="fa-solid fa-magnifying-glass-plus mr-1"></i>확대</button>
+          <button onclick="zoomImage(-0.25)" class="px-2 py-0.5 bg-white rounded border border-slate-200 hover:bg-slate-50"><i class="fa-solid fa-magnifying-glass-minus mr-1"></i>축소</button>
+          <button onclick="resetZoomImage()" class="px-2 py-0.5 bg-white rounded border border-slate-200 hover:bg-slate-50">초기화</button>
+        </div>
+        <button onclick="openOriginalImageInNewTab()" class="text-indigo-600 underline text-[11px]"><i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>새창에서 크게보기</button>
+      </div>
+
+      <div class="flex-1 overflow-auto rounded-xl bg-slate-900 flex items-center justify-center p-1 border border-slate-200 relative">
+        <img id="yejinOriginalImgTag" src="" alt="예진 스케줄 사진" class="w-full h-auto object-contain rounded-lg transition-transform duration-200 origin-center hidden" />
+        <div id="yejinNoImgAlert" class="text-center p-6 space-y-2 bg-white rounded-xl">
+          <i class="fa-regular fa-image text-slate-300 text-4xl block"></i>
+          <p class="text-xs text-slate-500 font-semibold" id="yejinNoImgAlertText">등록된 스케줄 원본 사진이 없습니다.</p>
+          <p class="text-[10px] text-slate-400">'근무표 등록'에서 사진을 올리시면 두 사람 모두 실시간으로 크게 볼 수 있습니다.</p>
+        </div>
+      </div>
+
+      <div class="pt-1">
+        <button onclick="closeYejinImageModal()" class="w-full bg-slate-900 text-white text-xs py-2.5 rounded-xl font-bold hover:bg-slate-800 transition">
+          닫기
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================
+    // 0. 안전 로컬 스토리지 파서 (Crash 방지)
+    // =========================================================
+    function safeGetStorage(key, defaultVal) {
+      try {
+        const item = localStorage.getItem(key);
+        if (!item || item === "undefined" || item === "null") return defaultVal;
+        return JSON.parse(item);
+      } catch (e) {
+        console.warn("Storage 파싱 에러, 기본값 사용:", key, e);
+        return defaultVal;
+      }
+    }
+
+    function safeSetStorage(key, val) {
+      try {
+        localStorage.setItem(key, typeof val === 'string' ? val : JSON.stringify(val));
+      } catch (e) {
+        console.warn("Storage 저장 실패:", key, e);
+      }
+    }
+
+    // =========================================================
+    // 1. 한국 표준시(KST) & 주요 해외 체류지 시차 환산 DB
+    // =========================================================
+    function getKSTDate() {
+      const now = new Date();
+      const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+      return new Date(utc + (9 * 3600000));
+    }
+
+    const kstNow = getKSTDate();
+    let currentYear = kstNow.getFullYear();
+    let currentMonth = kstNow.getMonth() + 1;
+    let currentDay = kstNow.getDate();
+    let selectedDateKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(currentDay).padStart(2, '0')}`;
+
+    let uploadTargetYear = currentYear;
+    let uploadTargetMonth = currentMonth;
+
+    let showKyuho = true;
+    let showYejin = true;
+    let currentEditMode = 'single';
+    let currentImgScale = 1.0;
+
+    const BASE_LOVE_DATE = new Date("2025-12-23");
+    const DEFAULT_FIREBASE_URL = "https://yktable-f14fe-default-rtdb.asia-southeast1.firebasedatabase.app/";
+
+    if (!localStorage.getItem('firebase_db_url')) {
+      safeSetStorage('firebase_db_url', DEFAULT_FIREBASE_URL);
+    }
+
+    function initYearSelector() {
+      const select = document.getElementById('selectUploadYear');
+      if (!select) return;
+      select.innerHTML = '';
+      for (let y = 2025; y <= 2040; y++) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.innerText = `${y}년`;
+        if (y === currentYear) opt.selected = true;
+        select.appendChild(opt);
+      }
+    }
+
+    const TIMEZONE_OFFSET_HOURS = {
+      "비슈케크": -3, "자카르타": -2, "방콕": -2, "치앙마이": -2,
+      "다낭": -2, "나트랑": -2, "푸꾸옥": -2, "싱가포르": -1,
+      "홍콩": -1, "타이베이": -1, "타이중": -1, "가오슝": -1,
+      "울란바토르": -1, "선양": -1, "우한": -1, "로마": -7,
+      "파리": -7, "바르셀로나": -7, "프랑크푸르트": -7, "밴쿠버": -16, "사이판": +1
+    };
+
+    function convertLocalToKST(dest, localTimeStr) {
+      if (!localTimeStr || !dest) return "";
+      let offset = null;
+      for (const [city, diff] of Object.entries(TIMEZONE_OFFSET_HOURS)) {
+        if (dest.includes(city)) { offset = diff; break; }
+      }
+      if (offset === null || offset === 0) return "";
+      
+      const [h, m] = localTimeStr.split(':').map(Number);
+      if (isNaN(h) || isNaN(m)) return "";
+      
+      let kstH = h - offset;
+      let dayDiff = "";
+      if (kstH >= 24) { kstH -= 24; dayDiff = "+1일"; }
+      else if (kstH < 0) { kstH += 24; dayDiff = "-1일"; }
+      
+      const timePart = `${String(kstH).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      return dayDiff ? `(KR${dayDiff} ${timePart})` : `(KR ${timePart})`;
+    }
+
+    function isStayFlight(dest) {
+      if (!dest) return false;
+      const stayDestinations = [
+        "로마", "파리", "바르셀로나", "프랑크푸르트", "밴쿠버", "비슈케크", "자카르타", 
+        "싱가포르", "다낭", "나트랑", "푸꾸옥", "사이판", "세부", "치앙마이", "방콕", 
+        "칼리보", "부산", "제주체류"
+      ];
+      return stayDestinations.some(d => dest.includes(d));
+    }
+
+    // ★ 7월 1~2일 규호 '휴가' 포함 7·8·9·10월 전수 데이터 기본 마스터 DB ★
+    const MASTER_SCHEDULE_DB = {
+      // [7월: 1, 2일 규호 휴가 / 12~15일 부산 1-2]
+      "2026-07-01": { my: { type: "휴가", start: "", end: "" }, gf: { type: "체류", destination: "방콕", start: "", end: "", isQuickTurn: false, isPureStay: true } },
+      "2026-07-02": { my: { type: "휴가", start: "", end: "" }, gf: { type: "체류", destination: "방콕", start: "22:55", end: "06:30", isQuickTurn: false, isInbound: true } },
+      "2026-07-03": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "체류", destination: "방콕", start: "", end: "", isQuickTurn: false, isArrivalOnly: true } },
+      "2026-07-12": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "체류", destination: "부산", start: "12:45", end: "20:30", isQuickTurn: false, isStayBase: true } },
+      "2026-07-13": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "체류", destination: "부산", start: "11:50", end: "17:05", isQuickTurn: false, isStayBase: true } },
+      "2026-07-14": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "체류", destination: "부산", start: "07:55", end: "12:00", isQuickTurn: false, isStayBase: true } },
+      "2026-07-15": { my: { type: "일근", start: "09:00", end: "18:00" }, gf: { type: "체류", destination: "부산", start: "05:45", end: "07:40", isQuickTurn: false, isInbound: true, isStayBase: true } },
+      "2026-07-23": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "퀵턴", destination: "오사카", start: "19:05", end: "02:15", isQuickTurn: true, isNightTurn: true } },
+      "2026-07-24": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+
+      // [8월: 3~6일 부산 베이스 1-2 패턴]
+      "2026-08-03": { my: { type: "-", start: "", end: "" }, gf: { type: "체류", destination: "부산", start: "12:45", end: "20:30", isQuickTurn: false, isStayBase: true } },
+      "2026-08-04": { my: { type: "-", start: "", end: "" }, gf: { type: "체류", destination: "부산", start: "11:50", end: "17:05", isQuickTurn: false, isStayBase: true } },
+      "2026-08-05": { my: { type: "-", start: "", end: "" }, gf: { type: "체류", destination: "부산", start: "07:55", end: "12:00", isQuickTurn: false, isStayBase: true } },
+      "2026-08-06": { my: { type: "-", start: "", end: "" }, gf: { type: "체류", destination: "부산", start: "05:45", end: "07:40", isQuickTurn: false, isInbound: true, isStayBase: true } },
+
+      // [9월 2609.png 실제 반영]
+      "2026-09-01": { my: { type: "대휴", start: "", end: "" }, gf: { type: "퀵턴", destination: "오사카", start: "01:30", end: "03:25", isQuickTurn: true, isNightTurn: true } },
+      "2026-09-02": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-09-03": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "퀵턴", destination: "오키나와", start: "09:00", end: "16:55", isQuickTurn: true } },
+      "2026-09-04": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "체류", destination: "자카르타", start: "13:10", end: "20:10", isQuickTurn: false } },
+      "2026-09-05": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "체류", destination: "자카르타", start: "", end: "", isQuickTurn: false, isPureStay: true } },
+      "2026-09-06": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "체류", destination: "자카르타", start: "20:40", end: "07:05", isQuickTurn: false, isInbound: true } },
+      "2026-09-07": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-09-08": { my: { type: "일근", start: "09:00", end: "18:00" }, gf: { type: "체류", destination: "비슈케크", start: "16:50", end: "23:15", isQuickTurn: false } },
+      "2026-09-09": { my: { type: "대휴", start: "", end: "" }, gf: { type: "체류", destination: "비슈케크", start: "", end: "", isQuickTurn: false, isPureStay: true } },
+      "2026-09-10": { my: { type: "스포스", start: "", end: "" }, gf: { type: "체류", destination: "비슈케크", start: "", end: "", isQuickTurn: false, isPureStay: true } },
+      "2026-09-11": { my: { type: "스포스", start: "", end: "" }, gf: { type: "체류", destination: "비슈케크", start: "23:20", end: "09:35", isQuickTurn: false, isInbound: true } },
+      "2026-09-12": { my: { type: "O", start: "", end: "" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-09-13": { my: { type: "스포스", start: "", end: "" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-09-14": { my: { type: "O", start: "", end: "" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-09-15": { my: { type: "스포스", start: "", end: "" }, gf: { type: "SBY", destination: "", start: "06:00", end: "19:00", isQuickTurn: false } },
+      "2026-09-16": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "ISA", destination: "", start: "06:30", end: "11:30", isQuickTurn: false } },
+      "2026-09-17": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "퀵턴", destination: "제주", start: "06:00", end: "13:30", isQuickTurn: true } },
+      "2026-09-18": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "체류", destination: "나리타", start: "08:05", end: "17:40", isQuickTurn: false } },
+      "2026-09-19": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "체류", destination: "나리타", start: "07:30", end: "11:30", isQuickTurn: false, isInbound: true } },
+      "2026-09-20": { my: { type: "O", start: "", end: "" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-09-21": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "퀵턴", destination: "선양", start: "06:05", end: "13:35", isQuickTurn: true } },
+      "2026-09-22": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "퀵턴", destination: "제주", start: "05:40", end: "10:00", isQuickTurn: true } },
+      "2026-09-23": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "TR", destination: "", start: "08:00", end: "17:00", isQuickTurn: false } },
+      "2026-09-24": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "TR", destination: "", start: "08:00", end: "17:00", isQuickTurn: false } },
+      "2026-09-25": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-09-26": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "TR", destination: "", start: "08:00", end: "17:00", isQuickTurn: false } },
+      "2026-09-27": { my: { type: "일근", start: "09:00", end: "18:00" }, gf: { type: "퀵턴", destination: "타이중", start: "11:55", end: "20:45", isQuickTurn: true } },
+      "2026-09-28": { my: { type: "대휴", start: "", end: "" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-09-29": { my: { type: "O", start: "", end: "" }, gf: { type: "TR", destination: "", start: "08:00", end: "17:00", isQuickTurn: false } },
+      "2026-09-30": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "퀵턴", destination: "나리타", start: "16:15", end: "00:25", isQuickTurn: true } },
+
+      // [10월 2610.png 실제 반영]
+      "2026-10-01": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "SBY", destination: "", start: "11:00", end: "19:00", isQuickTurn: false } },
+      "2026-10-02": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-10-03": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "퀵턴", destination: "오사카", start: "06:00", end: "13:30", flight: "301/302 ICN-KIX", isQuickTurn: true } },
+      "2026-10-04": { my: { type: "TS-3", start: "", end: "" }, gf: { type: "체류", destination: "다낭", start: "14:05", end: "23:00", flight: "725/844 GMP-CJU", isQuickTurn: false } },
+      "2026-10-05": { my: { type: "O", start: "", end: "" }, gf: { type: "체류", destination: "다낭", start: "19:50", end: "23:50", flight: "025 CJJ-DAD", isQuickTurn: false } },
+      "2026-10-06": { my: { type: "대휴", start: "", end: "" }, gf: { type: "체류", destination: "다낭", start: "", end: "", flight: "다낭 체류", isQuickTurn: false, isPureStay: true } },
+      "2026-10-07": { my: { type: "대휴", start: "", end: "" }, gf: { type: "체류", destination: "다낭", start: "00:15", end: "08:15", flight: "014 DAD-ICN", isQuickTurn: false, isInbound: true } },
+      "2026-10-08": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-10-09": { my: { type: "조근", start: "05:00", end: "09:00" }, gf: { type: "SBY", destination: "", start: "06:00", end: "19:00", isQuickTurn: false } },
+      "2026-10-10": { my: { type: "조근", start: "05:00", end: "09:00" }, gf: { type: "퀵턴", destination: "구마모토", start: "05:55", end: "12:00", flight: "287/288 ICN-KMJ", isQuickTurn: true } },
+      "2026-10-11": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-10-12": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "SBY", destination: "", start: "06:00", end: "19:00", isQuickTurn: false } },
+      "2026-10-13": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "SBY", destination: "", start: "06:00", end: "19:00", isQuickTurn: false } },
+      "2026-10-14": { my: { type: "대휴", start: "", end: "" }, gf: { type: "SBY", destination: "", start: "06:00", end: "19:00", isQuickTurn: false } },
+      "2026-10-15": { my: { type: "대휴", start: "", end: "" }, gf: { type: "GSA", destination: "", start: "05:00", end: "10:00", isQuickTurn: false } },
+      "2026-10-16": { my: { type: "대휴", start: "", end: "" }, gf: { type: "체류", destination: "싱가포르", start: "13:50", end: "21:30", flight: "161 ICN-SIN", isQuickTurn: false } },
+      "2026-10-17": { my: { type: "조근", start: "05:00", end: "09:00" }, gf: { type: "체류", destination: "싱가포르", start: "21:50", end: "06:45", flight: "162 SIN-ICN", isQuickTurn: false, isInbound: true } },
+      "2026-10-18": { my: { type: "O", start: "", end: "" }, gf: { type: "체류", destination: "싱가포르", start: "", end: "", isQuickTurn: false, isArrivalOnly: true } },
+      "2026-10-19": { my: { type: "연수", start: "", end: "" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-10-20": { my: { type: "연수", start: "", end: "" }, gf: { type: "SBY", destination: "", start: "06:00", end: "19:00", isQuickTurn: false } },
+      "2026-10-21": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "퀵턴", destination: "제주", start: "05:15", end: "13:20", flight: "701/804 GMP-CJU", isQuickTurn: true } },
+      "2026-10-22": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "SBY", destination: "", start: "06:00", end: "19:00", isQuickTurn: false } },
+      "2026-10-23": { my: { type: "대휴", start: "", end: "" }, gf: { type: "SBY", destination: "", start: "06:00", end: "19:00", isQuickTurn: false } },
+      "2026-10-24": { my: { type: "O", start: "", end: "" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-10-25": { my: { type: "O", start: "", end: "" }, gf: { type: "체류", destination: "로마", start: "09:00", end: "17:00", flight: "405 ICN-FCO", isQuickTurn: false } },
+      "2026-10-26": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "체류", destination: "로마", start: "", end: "", isQuickTurn: false, isPureStay: true } },
+      "2026-10-27": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "체류", destination: "로마", start: "17:50", end: "14:50", flight: "406 FCO-ICN", isQuickTurn: false, isInbound: true } },
+      "2026-10-28": { my: { type: "조근", start: "05:00", end: "13:00" }, gf: { type: "체류", destination: "로마", start: "", end: "", isQuickTurn: false, isArrivalOnly: true } },
+      "2026-10-29": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-10-30": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "OFF", destination: "", start: "", end: "", isQuickTurn: false } },
+      "2026-10-31": { my: { type: "석근", start: "13:00", end: "21:00" }, gf: { type: "SBY", destination: "", start: "06:00", end: "19:00", isQuickTurn: false } }
+    };
+
+    let scheduleDB = safeGetStorage('coupleScheduleDB_v28', MASTER_SCHEDULE_DB);
+    // 기존 캐시가 마스터보다 비어있을 경우 마스터 병합
+    if (!scheduleDB["2026-07-01"] || scheduleDB["2026-07-01"]?.my?.type !== "휴가" || !scheduleDB["2026-08-03"]) {
+      scheduleDB = { ...MASTER_SCHEDULE_DB, ...scheduleDB };
+      scheduleDB["2026-07-01"].my = { type: "휴가", start: "", end: "" };
+      scheduleDB["2026-07-02"].my = { type: "휴가", start: "", end: "" };
+      safeSetStorage('coupleScheduleDB_v28', scheduleDB);
+    }
+
+    let fileHistory = safeGetStorage('coupleFileHistory_v28', {
+      "2026-10": { kyuho: "교대근무표 10월.xlsx", yejin: "2610.png" },
+      "2026-09": { kyuho: "교대근무표 9월.xlsx", yejin: "2609.png" },
+      "2026-08": { kyuho: "교대근무표 8월.xlsx", yejin: "2608.jpg" },
+      "2026-07": { kyuho: "교대근무표 7월.xlsx", yejin: "2607.jpg" }
+    });
+    
+    let customAnniversaries = safeGetStorage('coupleCustomAniv_v28', [
+      { name: "규호 생일", date: "2026-05-18", isRepeat: true },
+      { name: "예진 생일", date: "2026-09-12", isRepeat: true }
+    ]);
+
+    const HOLIDAYS = {
+      "2026-01-01": "신정", "2026-02-16": "설날 연휴", "2026-02-17": "설날", "2026-02-18": "설날 연휴",
+      "2026-03-01": "삼일절", "2026-03-02": "대체공휴일", "2026-05-01": "근로자의날", "2026-05-05": "어린이날",
+      "2026-05-24": "부처님오신날", "2026-05-25": "대체공휴일", "2026-06-06": "현충일", "2026-08-15": "광복절",
+      "2026-08-17": "대체공휴일", "2026-09-24": "추석 연휴", "2026-09-25": "추석", "2026-09-26": "추석 연휴",
+      "2026-10-03": "개천절", "2026-10-05": "대체공휴일", "2026-10-09": "한글날", "2026-12-25": "성탄절"
+    };
+
+    // =========================================================
+    // 2. Firebase 실시간 동기화
+    // =========================================================
+    function updateSyncBadge(isSynced) {
+      const badge = document.getElementById('syncStatusBadge');
+      if (!badge) return;
+      const dbUrl = localStorage.getItem('firebase_db_url');
+      if (dbUrl && isSynced) {
+        badge.className = "text-[9px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold border border-emerald-200 cursor-pointer flex items-center";
+        badge.innerHTML = '<i class="fa-solid fa-circle text-[6px] mr-1 text-emerald-500 animate-pulse"></i>실시간 공유됨';
+      } else if (dbUrl && !isSynced) {
+        badge.className = "text-[9px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full font-bold border border-amber-200 cursor-pointer flex items-center";
+        badge.innerHTML = '<i class="fa-solid fa-circle text-[6px] mr-1 text-amber-500"></i>동기화 확인필요';
+      } else {
+        badge.className = "text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-bold border border-slate-200 cursor-pointer";
+        badge.innerText = '로컬 저장됨';
+      }
+    }
+
+    async function syncToFirebase() {
+      const dbUrl = localStorage.getItem('firebase_db_url');
+      if (!dbUrl) return;
+      try {
+        const cleanUrl = dbUrl.replace(/\/+$/, '');
+        await Promise.all([
+          fetch(`${cleanUrl}/schedules.json`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(scheduleDB)
+          }),
+          fetch(`${cleanUrl}/anniversaries.json`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(customAnniversaries)
+          })
+        ]);
+        updateSyncBadge(true);
+      } catch (e) {
+        console.warn("Firebase 동기화 실패:", e);
+        updateSyncBadge(false);
+      }
+    }
+
+    async function loadFromFirebase(isManual = false) {
+      const dbUrl = localStorage.getItem('firebase_db_url');
+      if (!dbUrl) return;
+      try {
+        const cleanUrl = dbUrl.replace(/\/+$/, '');
+        const [resSched, resAniv] = await Promise.all([
+          fetch(`${cleanUrl}/schedules.json`),
+          fetch(`${cleanUrl}/anniversaries.json`)
+        ]);
+
+        let updated = false;
+
+        if (resSched.ok) {
+          const schedData = await resSched.json();
+          if (schedData === null) {
+            await syncToFirebase();
+          } else if (schedData && typeof schedData === 'object' && Object.keys(schedData).length > 0) {
+            if (schedData["2026-07-01"]?.my) schedData["2026-07-01"].my.type = "휴가";
+            if (schedData["2026-07-02"]?.my) schedData["2026-07-02"].my.type = "휴가";
+
+            const str = JSON.stringify(schedData);
+            if (str !== JSON.stringify(scheduleDB)) {
+              scheduleDB = schedData;
+              safeSetStorage('coupleScheduleDB_v28', scheduleDB);
+              updated = true;
+            }
+          }
+        }
+
+        if (resAniv.ok) {
+          const anivData = await resAniv.json();
+          if (anivData && Array.isArray(anivData) && anivData.length > 0) {
+            const anivStr = JSON.stringify(anivData);
+            if (anivStr !== JSON.stringify(customAnniversaries)) {
+              customAnniversaries = anivData;
+              safeSetStorage('coupleCustomAniv_v28', customAnniversaries);
+              updated = true;
+            }
+          }
+        }
+
+        updateSyncBadge(true);
+        if (updated) {
+          renderCalendar();
+          if (isManual) alert("클라우드에서 최신 근무표와 기념일을 동기화했습니다!");
+        } else if (isManual) {
+          alert("이미 최신 동기화 상태입니다!");
+        }
+      } catch (e) {
+        console.warn("Firebase 로드 실패:", e);
+        updateSyncBadge(false);
+        if (isManual) alert("동기화 연결 실패: Firebase 규칙 및 네트워크를 확인해 주세요.");
+      }
+    }
+
+    function manualSyncNow() {
+      const dbInput = document.getElementById('firebaseDbUrl');
+      const dbUrl = dbInput && dbInput.value.trim() ? dbInput.value.trim() : (localStorage.getItem('firebase_db_url') || DEFAULT_FIREBASE_URL);
+      safeSetStorage('firebase_db_url', dbUrl);
+      syncToFirebase();
+      loadFromFirebase(true);
+    }
+
+    setInterval(() => {
+      if (navigator.onLine) loadFromFirebase(false);
+    }, 3000);
+
+    function toggleCloudSyncInput() {
+      const box = document.getElementById('cloudSyncInputBox');
+      if (box) box.classList.toggle('hidden');
+    }
+
+    function onFirebaseUrlChanged() {
+      const url = document.getElementById('firebaseDbUrl').value.trim();
+      safeSetStorage('firebase_db_url', url);
+      updateSyncBadge(Boolean(url));
+      if (url) syncToFirebase();
+    }
+
+    function onApiKeyChanged() {
+      const key = document.getElementById('geminiApiKey').value.trim();
+      safeSetStorage('gemini_api_key', key);
+    }
+
+    function saveDB() {
+      safeSetStorage('coupleScheduleDB_v28', scheduleDB);
+      safeSetStorage('coupleCustomAniv_v28', customAnniversaries);
+      safeSetStorage('coupleFileHistory_v28', fileHistory);
+      syncToFirebase();
+    }
+
+    // =========================================================
+    // 3. D-Day 및 기념일 함수
+    // =========================================================
+    function getDiffDays(date1, date2) {
+      const utc1 = Date.UTC(date1.getFullYear(), date1.getMonth(), date1.getDate());
+      const utc2 = Date.UTC(date2.getFullYear(), date2.getMonth(), date2.getDate());
+      return Math.floor((utc2 - utc1) / (1000 * 60 * 60 * 24)) + 1;
+    }
+
+    function updateDDayHeader() {
+      const dDayEl = document.getElementById('dDayBadge');
+      if (!dDayEl) return;
+      const today = getKSTDate();
+      const diff = getDiffDays(BASE_LOVE_DATE, today);
+      dDayEl.innerHTML = `<i class="fa-solid fa-heart mr-1 text-rose-500"></i>만난 지 <strong>D+${diff}일</strong> (${BASE_LOVE_DATE.getFullYear()}.${BASE_LOVE_DATE.getMonth()+1}.${BASE_LOVE_DATE.getDate()}~)`;
+      const modalDDayEl = document.getElementById('modalDDayText');
+      if (modalDDayEl) modalDDayEl.innerText = `오늘 기준 함께한 지 ${diff}일째입니다 💕`;
+    }
+
+    function getAnniversaryInfo(dateStr) {
+      const targetDate = new Date(dateStr);
+      const diff = getDiffDays(BASE_LOVE_DATE, targetDate);
+
+      if (diff > 0 && diff % 100 === 0) return { type: "100일", name: `💖 ${diff}일` };
+      if (targetDate.getMonth() === BASE_LOVE_DATE.getMonth() && targetDate.getDate() === BASE_LOVE_DATE.getDate()) {
+        const years = targetDate.getFullYear() - BASE_LOVE_DATE.getFullYear();
+        if (years > 0) return { type: "주년", name: `💍 ${years}주년` };
+      }
+
+      const tM = String(targetDate.getMonth() + 1).padStart(2, '0');
+      const tD = String(targetDate.getDate()).padStart(2, '0');
+      const mmdd = `${tM}-${tD}`;
+
+      for (const aniv of customAnniversaries) {
+        if (aniv.isRepeat && aniv.date.endsWith(mmdd)) return { type: "생일/반복", name: `🎂 ${aniv.name}` };
+        if (!aniv.isRepeat && aniv.date === dateStr) return { type: "지정", name: `⭐ ${aniv.name}` };
+      }
+      return null;
+    }
+
+    // =========================================================
+    // 4. 타임라인 & 캘린더 정밀 렌더링
+    // =========================================================
+    function calculateBarPosition(startTime, endTime) {
+      const [sh, sm] = startTime.split(':').map(Number);
+      let [eh, em] = endTime.split(':').map(Number);
+      if (eh < sh) eh += 24;
+
+      const startMin = sh * 60 + sm;
+      const endMin = eh * 60 + em;
+      const totalMin = 24 * 60;
+
+      const left = Math.max(0, Math.min(100, (startMin / totalMin) * 100));
+      const width = Math.max(3, Math.min(100 - left, ((endMin - startMin) / totalMin) * 100));
+      return { left, width };
+    }
+
+    function renderAvailableDates() {
+      const monthTitle = document.getElementById('availableDateMonthTitle');
+      if (monthTitle) monthTitle.innerText = `${currentMonth}월`;
+      const container = document.getElementById('availableDatesList');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const totalDays = new Date(currentYear, currentMonth, 0).getDate();
+      const availableDays = [];
+
+      for (let day = 1; day <= totalDays; day++) {
+        const dateKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dayData = scheduleDB[dateKey];
+        if (!dayData || !dayData.my || !dayData.gf) continue;
+
+        const myType = dayData.my.type || '-';
+        const gfType = dayData.gf.type || '-';
+        const gfEnd = dayData.gf.end || '';
+        const isNightTurn = dayData.gf.isNightTurn || (dayData.gf.isQuickTurn && gfEnd && gfEnd <= '06:00');
+
+        const isMyOff = ['O', '대휴', '연차', '휴가'].includes(myType);
+        const isMyJoGeun = (myType === '조근' || myType === '공휴일조근' || myType === '평일조근');
+        const isGfOff = (gfType === 'OFF');
+        const isGfHomeSby = (gfType === 'SBY');
+        const isGfAirportSbyEarly = (gfType === 'ISA' || gfType === 'GSA');
+
+        if (isMyOff && isGfOff) {
+          availableDays.push({ day, type: "종일", text: `${currentMonth}/${day}(종일)` });
+        } else if (isMyJoGeun && isGfOff) {
+          availableDays.push({ day, type: "오후", text: `${currentMonth}/${day}(오후 13시~)` });
+        } else if (isMyJoGeun && isGfHomeSby) {
+          availableDays.push({ day, type: "오후", text: `${currentMonth}/${day}(오후 13시~ SBY)` });
+        } else if (isMyOff && isGfHomeSby) {
+          availableDays.push({ day, type: "오후", text: `${currentMonth}/${day}(오후 13시~ SBY)` });
+        } else if (isMyOff && isGfAirportSbyEarly) {
+          availableDays.push({ day, type: "오후", text: `${currentMonth}/${day}(오후 12시~ ${gfType})` });
+        } else if ((isMyOff || isMyJoGeun) && isNightTurn) {
+          availableDays.push({ day, type: "저녁", text: `${currentMonth}/${day}(오후 16시~ 심야퀵턴후)` });
+        } else if ((isMyOff || isMyJoGeun) && gfType === 'TR') {
+          availableDays.push({ day, type: "저녁", text: `${currentMonth}/${day}(저녁 17시~ TR)` });
+        } else if ((isMyOff || isMyJoGeun) && dayData.gf.isQuickTurn && gfEnd && gfEnd > '06:00') {
+          const startTimeStr = gfEnd <= '14:00' ? '오후 14시~' : `저녁 ${gfEnd}~`;
+          availableDays.push({ day, type: "저녁", text: `${currentMonth}/${day}(${startTimeStr})` });
+        }
+      }
+
+      if (availableDays.length === 0) {
+        container.innerHTML = `<span class="text-xs text-slate-400">근무표를 등록하면 데이트 가능한 날이 자동 계산됩니다.</span>`;
+        return;
+      }
+
+      availableDays.forEach(item => {
+        const btn = document.createElement('button');
+        const colorClass = item.type === "종일" ? "bg-rose-500 text-white font-bold" : (item.type === "오후" ? "bg-pink-500 text-white font-bold" : "bg-white text-rose-600 border border-rose-200 font-semibold");
+        btn.className = `text-[11px] px-2.5 py-1 rounded-lg shadow-xs hover:scale-105 transition-transform flex items-center gap-1 ${colorClass}`;
+        btn.innerHTML = `${item.type === "종일" ? "💖" : (item.type === "오후" ? "✨" : "🌙")} ${item.text}`;
+        btn.onclick = () => {
+          const targetKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(item.day).padStart(2, '0')}`;
+          selectDate(targetKey);
+        };
+        container.appendChild(btn);
+      });
+    }
+
+    function updateDetailCard() {
+      const dayData = scheduleDB[selectedDateKey] || { my: null, gf: null, date: null, myPromise: "", gfPromise: "" };
+      const dateObj = new Date(selectedDateKey);
+      const days = ['일','월','화','수','목','금','토'];
+      const titleEl = document.getElementById('selectedDateTitle');
+      if (titleEl) titleEl.innerText = `${dateObj.getFullYear()}년 ${dateObj.getMonth()+1}월 ${dateObj.getDate()}일 (${days[dateObj.getDay()]})`;
+
+      const tagsBox = document.getElementById('selectedDateTags');
+      if (tagsBox) {
+        tagsBox.innerHTML = '';
+        const holiday = HOLIDAYS[selectedDateKey];
+        if (holiday) tagsBox.innerHTML += `<span class="text-[10px] bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded-md"><i class="fa-solid fa-flag mr-1"></i>${holiday}</span>`;
+        const aniv = getAnniversaryInfo(selectedDateKey);
+        if (aniv) tagsBox.innerHTML += `<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded-md"><i class="fa-solid fa-star mr-1"></i>${aniv.name}</span>`;
+      }
+
+      // 1. 규호 타임라인 (필터 상태와 무관하게 항상 표시)
+      const wrapKyuho = document.getElementById('timelineWrapKyuho');
+      if (wrapKyuho) {
+        wrapKyuho.classList.remove('hidden');
+        const myBar = document.getElementById('detailMyBar');
+        const myText = document.getElementById('detailMyShiftText');
+        if (dayData.my && dayData.my.type && dayData.my.type !== '-') {
+          if (dayData.my.start && dayData.my.end) {
+            const { left, width } = calculateBarPosition(dayData.my.start, dayData.my.end);
+            myBar.style.left = `${left}%`;
+            myBar.style.width = `${width}%`;
+            myBar.innerText = dayData.my.type;
+            myBar.className = 'h-full bg-blue-600 text-white text-[10px] flex items-center justify-center font-bold absolute rounded shadow-xs';
+            myText.innerText = `${dayData.my.type} (${dayData.my.start} ~ ${dayData.my.end})`;
+          } else {
+            myBar.style.width = '0%';
+            myBar.innerText = '';
+            myText.innerText = dayData.my.type;
+          }
+        } else {
+          myBar.style.width = '0%';
+          myBar.innerText = '';
+          myText.innerText = '근무 없음';
+        }
+      }
+
+      // 2. 예진 타임라인 (필터 상태와 무관하게 항상 표시)
+      const wrapYejin = document.getElementById('timelineWrapYejin');
+      if (wrapYejin) {
+        wrapYejin.classList.remove('hidden');
+        const gfBar = document.getElementById('detailGfBar');
+        const gfText = document.getElementById('detailGfShiftText');
+        const dest = dayData.gf ? (dayData.gf.destination || "") : "";
+
+        if (dayData.gf && dayData.gf.start && dayData.gf.end) {
+          const { left, width } = calculateBarPosition(dayData.gf.start, dayData.gf.end);
+          gfBar.style.left = `${left}%`;
+          gfBar.style.width = `${width}%`;
+          gfBar.innerText = dest || dayData.gf.type;
+          gfBar.className = dayData.gf.isQuickTurn ? 'h-full bg-cyan-600 text-white text-[10px] flex items-center justify-center font-bold absolute rounded shadow-xs' : 'h-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold absolute rounded shadow-xs';
+          
+          let desc = `${dest ? '✈️ '+dest+' ' : ''}(${dayData.gf.start} ~ ${dayData.gf.end})`;
+          if (!dayData.gf.isQuickTurn && dayData.gf.type === '체류') {
+            if (dayData.gf.isInbound) {
+              const kstStart = convertLocalToKST(dest, dayData.gf.start);
+              if (kstStart) desc += ` [출발 KST: ${kstStart}]`;
+            } else {
+              const kstEnd = convertLocalToKST(dest, dayData.gf.end);
+              if (kstEnd) desc += ` [도착 KST: ${kstEnd}]`;
+            }
+          }
+          if (dayData.gf.flight) desc += ` [${dayData.gf.flight}]`;
+          gfText.innerText = desc;
+        } else {
+          gfBar.style.width = '0%';
+          gfBar.innerText = '';
+          let desc = dayData.gf ? (dayData.gf.isArrivalOnly ? `${dest} (도착일/체류)` : (dayData.gf.isPureStay ? `${dest} (L/O 체류)` : (dest ? `${dest} (${dayData.gf.type})` : `${dayData.gf.type}`))) : '근무 없음';
+          gfText.innerText = desc;
+        }
+      }
+
+      // 3. 데이트 약속 & 개인 약속
+      const planBox = document.getElementById('datePlanBox');
+      const planTime = document.getElementById('datePlanTime');
+      const planNote = document.getElementById('datePlanNote');
+      if (planBox && planTime && planNote) {
+        if (dayData.date) {
+          planBox.className = 'p-3 bg-rose-50 rounded-xl border border-rose-300 text-xs space-y-1';
+          planTime.innerText = dayData.date.time || '시간 미지정';
+          planNote.innerText = dayData.date.memo || '약속 내용 없음';
+        } else {
+          planBox.className = 'p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1';
+          planTime.innerText = '미정';
+          planNote.innerText = '등록된 데이트가 없습니다. 우측 상단 버튼을 눌러 데이트를 계획해 보세요!';
+        }
+      }
+
+      const pMy = document.getElementById('detailMyPromise');
+      const pGf = document.getElementById('detailGfPromise');
+      if (pMy) pMy.innerText = dayData.myPromise || '없음';
+      if (pGf) pGf.innerText = dayData.gfPromise || '없음';
+    }
+
+    function renderCalendar() {
+      updateDDayHeader();
+
+      const myTitle = document.getElementById('currentMonthYear');
+      if (myTitle) myTitle.innerText = `${currentYear}. ${String(currentMonth).padStart(2, '0')}`;
+      
+      const upBtnTxt = document.getElementById('headerUploadBtnText');
+      if (upBtnTxt) upBtnTxt.innerText = `${currentMonth}월 등록`;
+
+      const grid = document.getElementById('calendarGrid');
+      if (!grid) return;
+      grid.innerHTML = '';
+
+      const firstDay = new Date(currentYear, currentMonth - 1, 1).getDay();
+      const totalDays = new Date(currentYear, currentMonth, 0).getDate();
+
+      for (let i = 0; i < firstDay; i++) {
+        const emptyCell = document.createElement('div');
+        emptyCell.className = 'calendar-cell bg-slate-50/40 border-b border-r border-slate-100';
+        grid.appendChild(emptyCell);
+      }
+
+      for (let day = 1; day <= totalDays; day++) {
+        const dateKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const dayData = scheduleDB[dateKey] || { my: null, gf: null, date: null };
+        const holidayName = HOLIDAYS[dateKey];
+        const aniv = getAnniversaryInfo(dateKey);
+
+        const cell = document.createElement('div');
+        cell.className = `calendar-cell border-b border-r border-slate-100 px-1 py-1 flex flex-col justify-start items-stretch cursor-pointer hover:bg-slate-50 transition relative overflow-hidden ${selectedDateKey === dateKey ? 'ring-2 ring-indigo-500 rounded-xl bg-indigo-50/30' : ''}`;
+        cell.onclick = () => selectDate(dateKey);
+
+        const topRow = document.createElement('div');
+        topRow.className = 'h-[15px] flex items-center justify-between shrink-0 leading-none mb-1';
+        
+        const dayInfoWrap = document.createElement('div');
+        dayInfoWrap.className = 'flex items-baseline space-x-1';
+
+        const daySpan = document.createElement('span');
+        const dayOfWeek = new Date(currentYear, currentMonth - 1, day).getDay();
+        const isRed = (dayOfWeek === 0) || Boolean(holidayName);
+        daySpan.className = `text-[11px] font-bold ${isRed ? 'text-rose-500' : (dayOfWeek === 6 ? 'text-blue-600' : 'text-slate-700')}`;
+        daySpan.innerText = day;
+        dayInfoWrap.appendChild(daySpan);
+
+        if (holidayName) {
+          const holiSpan = document.createElement('span');
+          holiSpan.className = 'text-[7.5px] text-rose-600 font-bold tracking-tighter truncate max-w-[34px]';
+          holiSpan.innerText = holidayName;
+          dayInfoWrap.appendChild(holiSpan);
+        }
+        topRow.appendChild(dayInfoWrap);
+
+        const iconWrap = document.createElement('div');
+        iconWrap.className = 'flex items-center space-x-1';
+        if (aniv) iconWrap.innerHTML += '<i class="fa-solid fa-star text-amber-500 text-[8px]"></i>';
+        if (dayData.date) iconWrap.innerHTML += '<i class="fa-solid fa-heart text-rose-500 text-[8.5px]"></i>';
+        
+        if (dayData.myPromise) {
+          iconWrap.innerHTML += '<span class="w-1.5 h-1.5 rounded-full bg-blue-600" title="규호 일정"></span>';
+        }
+        if (dayData.gfPromise) {
+          iconWrap.innerHTML += '<span class="w-1.5 h-1.5 rounded-full bg-rose-500" title="예진 일정"></span>';
+        }
+        topRow.appendChild(iconWrap);
+        cell.appendChild(topRow);
+
+        if (aniv) {
+          const anivBadge = document.createElement('div');
+          anivBadge.className = 'h-[11px] text-[7px] px-1 bg-amber-100 text-amber-800 font-bold rounded truncate text-center mb-0.5 leading-tight flex items-center justify-center';
+          anivBadge.innerText = aniv.name;
+          cell.appendChild(anivBadge);
+        }
+
+        const dutiesWrap = document.createElement('div');
+        dutiesWrap.className = 'flex flex-col justify-start items-stretch space-y-1 w-full';
+
+        // 1. 규호 배지 슬롯
+        if (showKyuho) {
+          const myTag = document.createElement('div');
+          myTag.className = 'h-[18px] text-[8.5px] rounded truncate tracking-tight font-bold text-center flex items-center justify-center ';
+          if (dayData.my && dayData.my.type && dayData.my.type !== '-') {
+            if (['O', '대휴', '연차', '휴가'].includes(dayData.my.type)) {
+              myTag.className += 'text-emerald-700 bg-emerald-50 border border-emerald-200';
+              myTag.innerText = dayData.my.type;
+            } else {
+              myTag.className += 'text-blue-700 bg-blue-50 border border-blue-200';
+              myTag.innerText = dayData.my.type.replace('평일','').replace('공휴일','');
+            }
+          } else {
+            myTag.className += 'text-slate-300';
+            myTag.innerText = '-';
+          }
+          dutiesWrap.appendChild(myTag);
+
+          if (!showYejin && dayData.my && dayData.my.start && dayData.my.end) {
+            const timeTag = document.createElement('div');
+            timeTag.className = 'h-[26px] text-[7px] leading-tight font-mono font-bold text-blue-700 bg-blue-50/95 border border-blue-200 rounded px-0.5 py-0.5 text-center shadow-2xs flex flex-col justify-center';
+            timeTag.innerHTML = `<div>${dayData.my.start}</div><div class="text-[6.5px] text-blue-500 font-semibold -mt-0.5">~${dayData.my.end}</div>`;
+            dutiesWrap.appendChild(timeTag);
+          }
+        }
+
+        // 2. 예진 배지 슬롯
+        if (showYejin) {
+          const gfTag = document.createElement('div');
+          gfTag.className = 'h-[18px] text-[8.5px] rounded truncate tracking-tight font-black shadow-2xs text-center flex items-center justify-center ';
+
+          if (dayData.gf && dayData.gf.type) {
+            const g = dayData.gf;
+            const gType = g.type;
+            const dest = g.destination || "비행";
+
+            if (gType === 'OFF') {
+              gfTag.className += 'text-emerald-600 bg-emerald-50 border border-emerald-300';
+              gfTag.innerText = 'OFF';
+            } else if (gType === '퀵턴' || g.isQuickTurn) {
+              gfTag.className += 'text-cyan-700 bg-cyan-50 border border-cyan-300';
+              gfTag.innerText = dest;
+            } else if (gType === '체류' || gType === 'L/O' || gType === '비행') {
+              gfTag.className += 'text-rose-600 bg-rose-50 border border-rose-300';
+              gfTag.innerText = dest;
+            } else if (gType.includes('SB') || gType.includes('IS') || gType.includes('GS')) {
+              gfTag.className += 'text-yellow-700 bg-yellow-50 border border-yellow-300';
+              gfTag.innerText = gType;
+            } else if (gType === 'TR') {
+              gfTag.className += 'text-purple-600 bg-purple-50 border border-purple-300';
+              gfTag.innerText = 'TR';
+            } else {
+              gfTag.className += 'text-slate-600 bg-slate-100 border border-slate-200 font-bold';
+              gfTag.innerText = gType;
+            }
+          } else {
+            gfTag.className = 'text-[8.5px] text-slate-300 text-center';
+            gfTag.innerText = '-';
+          }
+          dutiesWrap.appendChild(gfTag);
+
+          if (!showKyuho && dayData.gf) {
+            if (dayData.gf.isArrivalOnly) {
+              // 귀국 당일은 체류지 배지만 나오고 시간대 표기 없음
+            } else if (dayData.gf.isPureStay || (dayData.gf.type === '체류' && !dayData.gf.start && !dayData.gf.end)) {
+              const loTag = document.createElement('div');
+              loTag.className = 'h-[34px] text-[8px] font-black text-rose-600 bg-rose-50/90 border border-rose-200 rounded text-center flex items-center justify-center shadow-2xs tracking-wider';
+              loTag.innerText = 'L/O';
+              dutiesWrap.appendChild(loTag);
+            } else if (dayData.gf.start && dayData.gf.end) {
+              const isStay = (dayData.gf.type === '체류' && !dayData.gf.isQuickTurn);
+              const isInbound = Boolean(dayData.gf.isInbound);
+              const dest = dayData.gf.destination;
+
+              const timeTag = document.createElement('div');
+              timeTag.className = 'h-[34px] text-[7px] leading-tight font-mono font-bold text-slate-700 bg-white/95 border border-slate-300 rounded px-0.5 py-0.5 text-center shadow-2xs flex flex-col justify-center';
+
+              if (isStay && isInbound) {
+                const kstStart = convertLocalToKST(dest, dayData.gf.start);
+                let html = `<div>${dayData.gf.start}</div>`;
+                if (kstStart) {
+                  html += `<div class="text-[5.5px] font-black text-rose-600 tracking-tighter whitespace-nowrap overflow-hidden leading-none my-0.5">${kstStart}</div>`;
+                }
+                html += `<div class="text-[6.5px] text-slate-500 font-semibold">~${dayData.gf.end}</div>`;
+                timeTag.innerHTML = html;
+              } else if (isStay && !isInbound) {
+                const kstEnd = convertLocalToKST(dest, dayData.gf.end);
+                let html = `<div>${dayData.gf.start}</div><div class="text-[6.5px] text-slate-500 font-semibold -mt-0.5">~${dayData.gf.end}</div>`;
+                if (kstEnd) {
+                  html += `<div class="text-[5.5px] font-black text-rose-600 tracking-tighter whitespace-nowrap overflow-hidden leading-none mt-0.5">${kstEnd}</div>`;
+                }
+                timeTag.innerHTML = html;
+              } else {
+                timeTag.innerHTML = `<div>${dayData.gf.start}</div><div class="text-[6.5px] text-slate-500 font-semibold -mt-0.5">~${dayData.gf.end}</div>`;
+              }
+
+              dutiesWrap.appendChild(timeTag);
+            }
+          }
+        }
+
+        cell.appendChild(dutiesWrap);
+        grid.appendChild(cell);
+      }
+
+      renderAvailableDates();
+      updateDetailCard();
+    }
+
+    function selectDate(dateKey) {
+      selectedDateKey = dateKey;
+      renderCalendar();
+    }
+
+    function changeMonth(delta) {
+      currentMonth += delta;
+      if (currentMonth > 12) { currentMonth = 1; currentYear += 1; }
+      if (currentMonth < 1) { currentMonth = 12; currentYear -= 1; }
+      selectedDateKey = `${currentYear}-${String(currentMonth).padStart(2,'0')}-01`;
+      renderCalendar();
+    }
+
+    // =========================================================
+    // 5. 캘린더 이미지 캡처
+    // =========================================================
+    async function captureCalendar() {
+      const target = document.getElementById('calendarCaptureArea');
+      const btn = document.getElementById('btnCaptureCalendar');
+      if (!target) return;
+
+      const originalBtnHtml = btn ? btn.innerHTML : '';
+      if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin text-indigo-500 text-[10px]"></i>';
+
+      try {
+        const canvas = await html2canvas(target, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          logging: false,
+          scrollY: 0,
+          scrollX: 0
+        });
+
+        const imageURL = canvas.toDataURL("image/png");
+        const downloadLink = document.createElement('a');
+        downloadLink.download = `규호♥예진_근무표_${currentYear}년_${String(currentMonth).padStart(2, '0')}월.png`;
+        downloadLink.href = imageURL;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+      } catch (err) {
+        console.error("캘린더 캡처 오류:", err);
+        alert("캘린더 캡처 중 문제가 발생했습니다: " + err.message);
+      } finally {
+        if (btn) btn.innerHTML = originalBtnHtml;
+      }
+    }
+
+    // =========================================================
+    // 6. 예진 스케줄 원본 사진 뷰어
+    // =========================================================
+    async function openYejinImageModal() {
+      const mKey = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+      const modalTitle = document.getElementById('yejinImageModalTitle');
+      const imgTag = document.getElementById('yejinOriginalImgTag');
+      const noImgAlert = document.getElementById('yejinNoImgAlert');
+      const noImgText = document.getElementById('yejinNoImgAlertText');
+
+      if (modalTitle) modalTitle.innerHTML = `<i class="fa-solid fa-image text-rose-500"></i> ${currentYear}년 ${currentMonth}월 스케줄 사진`;
+
+      let imgData = localStorage.getItem(`yejin_sched_img_${mKey}`);
+
+      if (!imgData) {
+        const dbUrl = localStorage.getItem('firebase_db_url');
+        if (dbUrl) {
+          try {
+            const cleanUrl = dbUrl.replace(/\/+$/, '');
+            const res = await fetch(`${cleanUrl}/images/${mKey}.json`);
+            if (res.ok) {
+              const cloudImgObj = await res.json();
+              if (cloudImgObj && cloudImgObj.data) {
+                imgData = cloudImgObj.data;
+                safeSetStorage(`yejin_sched_img_${mKey}`, imgData);
+              }
+            }
+          } catch (err) {
+            console.warn("Firebase 이미지 로드 실패:", err);
+          }
+        }
+      }
+
+      resetZoomImage();
+
+      if (imgData) {
+        imgTag.src = imgData;
+        imgTag.classList.remove('hidden');
+        noImgAlert.classList.add('hidden');
+      } else {
+        imgTag.src = '';
+        imgTag.classList.add('hidden');
+        noImgAlert.classList.remove('hidden');
+        if (noImgText) noImgText.innerText = `${currentYear}년 ${currentMonth}월에 등록된 스케줄 원본 사진이 없습니다.`;
+      }
+
+      document.getElementById('yejinImageModal').classList.remove('hidden');
+    }
+
+    function closeYejinImageModal() {
+      document.getElementById('yejinImageModal').classList.add('hidden');
+    }
+
+    function zoomImage(delta) {
+      currentImgScale = Math.max(0.6, Math.min(3.5, currentImgScale + delta));
+      const imgTag = document.getElementById('yejinOriginalImgTag');
+      if (imgTag) imgTag.style.transform = `scale(${currentImgScale})`;
+    }
+
+    function resetZoomImage() {
+      currentImgScale = 1.0;
+      const imgTag = document.getElementById('yejinOriginalImgTag');
+      if (imgTag) imgTag.style.transform = `scale(1)`;
+    }
+
+    function openOriginalImageInNewTab() {
+      const imgTag = document.getElementById('yejinOriginalImgTag');
+      if (!imgTag || !imgTag.src) return;
+      const w = window.open("");
+      w.document.write(`<title>이예진 근무표 원본 고화질</title><body style="margin:0;background:#111;display:flex;justify-content:center;"><img src="${imgTag.src}" style="max-width:100%;height:auto;"/></body>`);
+    }
+
+    function compressAndStoreYejinImage(file, mKey) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = async () => {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+            const maxDim = 2000;
+            if (width > maxDim || height > maxDim) {
+              if (width > height) {
+                height = Math.round((height * maxDim) / width);
+                width = maxDim;
+              } else {
+                width = Math.round((width * maxDim) / height);
+                height = maxDim;
+              }
+            }
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            
+            const compressed = canvas.toDataURL('image/jpeg', 0.88);
+            safeSetStorage(`yejin_sched_img_${mKey}`, compressed);
+
+            const dbUrl = localStorage.getItem('firebase_db_url');
+            if (dbUrl) {
+              try {
+                const cleanUrl = dbUrl.replace(/\/+$/, '');
+                await fetch(`${cleanUrl}/images/${mKey}.json`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ data: compressed, updatedAt: Date.now() })
+                });
+              } catch (cloudErr) {
+                console.warn("Firebase 이미지 업로드 실패:", cloudErr);
+              }
+            }
+
+            resolve(compressed);
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // =========================================================
+    // 7. 일정 수동 편집 (연속 기간 일괄 수정 모드 지원)
+    // =========================================================
+    function toggleScheduleFilter(target) {
+      if (target === 'kyuho') {
+        showKyuho = !showKyuho;
+        const btn = document.getElementById('filterBtnKyuho');
+        if (btn) {
+          if (showKyuho) {
+            btn.className = "px-3 py-1.5 rounded-xl font-bold border transition flex items-center gap-1.5 bg-blue-600 text-white border-blue-600 shadow-xs";
+            btn.innerHTML = '<i class="fa-solid fa-user-check text-[10px]"></i> 이규호';
+          } else {
+            btn.className = "px-3 py-1.5 rounded-xl font-bold border transition flex items-center gap-1.5 bg-slate-100 text-slate-400 border-slate-300";
+            btn.innerHTML = '<i class="fa-solid fa-user-xmark text-[10px]"></i> 이규호';
+          }
+        }
+      } else if (target === 'yejin') {
+        showYejin = !showYejin;
+        const btn = document.getElementById('filterBtnYejin');
+        if (btn) {
+          if (showYejin) {
+            btn.className = "px-3 py-1.5 rounded-xl font-bold border transition flex items-center gap-1.5 bg-rose-500 text-white border-rose-500 shadow-xs";
+            btn.innerHTML = '<i class="fa-solid fa-plane text-[10px]"></i> 이예진';
+          } else {
+            btn.className = "px-3 py-1.5 rounded-xl font-bold border transition flex items-center gap-1.5 bg-slate-100 text-slate-400 border-slate-300";
+            btn.innerHTML = '<i class="fa-solid fa-plane-slash text-[10px]"></i> 이예진';
+          }
+        }
+      }
+      renderCalendar();
+    }
+
+    function setEditMode(mode) {
+      currentEditMode = mode;
+      const tabSingle = document.getElementById('tabModeSingle');
+      const tabRange = document.getElementById('tabModeRange');
+      const rangeBox = document.getElementById('rangeDatePickerBox');
+
+      if (mode === 'range') {
+        tabRange.className = "flex-1 py-1.5 rounded-lg bg-white shadow-xs text-indigo-600 font-bold transition";
+        tabSingle.className = "flex-1 py-1.5 rounded-lg text-slate-500 hover:text-slate-700 font-bold transition";
+        rangeBox.classList.remove('hidden');
+        document.getElementById('inputRangeStart').value = selectedDateKey;
+        document.getElementById('inputRangeEnd').value = selectedDateKey;
+      } else {
+        tabSingle.className = "flex-1 py-1.5 rounded-lg bg-white shadow-xs text-indigo-600 font-bold transition";
+        tabRange.className = "flex-1 py-1.5 rounded-lg text-slate-500 hover:text-slate-700 font-bold transition";
+        rangeBox.classList.add('hidden');
+      }
+    }
+
+    function onMyShiftTypeChange() {
+      const type = document.getElementById('selectMyShiftType').value;
+      const wrapCustom = document.getElementById('wrapMyCustomShift');
+      if (type === '기타') {
+        wrapCustom.classList.remove('hidden');
+      } else {
+        wrapCustom.classList.add('hidden');
+        autoFillMyTime();
+      }
+    }
+
+    function onGfShiftTypeChange() {
+      const type = document.getElementById('selectGfShiftType').value;
+      const wrapCustom = document.getElementById('wrapGfCustomShift');
+      if (type === '기타') {
+        wrapCustom.classList.remove('hidden');
+      } else {
+        wrapCustom.classList.add('hidden');
+        autoFillGfTime();
+      }
+    }
+
+    function openEditModal(dateKey) {
+      selectedDateKey = dateKey;
+      const dayData = scheduleDB[dateKey] || { my: null, gf: null, date: null, myPromise: "", gfPromise: "" };
+      const title = document.getElementById('modalDateTitle');
+      if (title) title.innerText = `${dateKey} 근무 및 일정 편집`;
+
+      setEditMode('single');
+
+      if (dayData.date) {
+        const times = (dayData.date.time || '').split('~');
+        document.getElementById('inputDateTimeStart').value = times[0] ? times[0].trim() : '';
+        document.getElementById('inputDateTimeEnd').value = times[1] ? times[1].trim() : '';
+        document.getElementById('inputDateMemo').value = dayData.date.memo || '';
+      } else {
+        document.getElementById('inputDateTimeStart').value = '';
+        document.getElementById('inputDateTimeEnd').value = '';
+        document.getElementById('inputDateMemo').value = '';
+      }
+
+      document.getElementById('inputMyPromise').value = dayData.myPromise || '';
+      document.getElementById('inputGfPromise').value = dayData.gfPromise || '';
+
+      const mySelect = document.getElementById('selectMyShiftType');
+      const wrapMyCustom = document.getElementById('wrapMyCustomShift');
+      const inputMyCustom = document.getElementById('inputMyShiftCustom');
+      const predefinedMy = ["조근", "공휴일조근", "석근", "석1", "일근", "O", "대휴", "휴가", "연차", "TS-3", "TS-1", "연수"];
+
+      if (dayData.my && dayData.my.type) {
+        if (predefinedMy.includes(dayData.my.type)) {
+          mySelect.value = dayData.my.type;
+          wrapMyCustom.classList.add('hidden');
+          inputMyCustom.value = '';
+        } else {
+          mySelect.value = "기타";
+          wrapMyCustom.classList.remove('hidden');
+          inputMyCustom.value = dayData.my.type;
+        }
+        document.getElementById('inputMyTimeStart').value = dayData.my.start || '';
+        document.getElementById('inputMyTimeEnd').value = dayData.my.end || '';
+      } else {
+        mySelect.value = "조근";
+        wrapMyCustom.classList.add('hidden');
+        inputMyCustom.value = '';
+        autoFillMyTime();
+      }
+
+      const gfSelect = document.getElementById('selectGfShiftType');
+      const wrapGfCustom = document.getElementById('wrapGfCustomShift');
+      const inputGfCustom = document.getElementById('inputGfShiftCustom');
+      const predefinedGf = ["퀵턴", "체류", "OFF", "SBY", "ISA", "ISD", "GSA", "TR"];
+
+      if (dayData.gf && dayData.gf.type) {
+        if (predefinedGf.includes(dayData.gf.type)) {
+          gfSelect.value = dayData.gf.type;
+          wrapGfCustom.classList.add('hidden');
+          inputGfCustom.value = '';
+        } else {
+          gfSelect.value = "기타";
+          wrapMyCustom.classList.remove('hidden');
+          inputGfCustom.value = dayData.gf.type;
+        }
+        document.getElementById('inputGfDestination').value = dayData.gf.destination || '';
+        document.getElementById('inputGfTimeStart').value = dayData.gf.start || '';
+        document.getElementById('inputGfTimeEnd').value = dayData.gf.end || '';
+      } else {
+        gfSelect.value = "퀵턴";
+        wrapGfCustom.classList.add('hidden');
+        inputGfCustom.value = '';
+        autoFillGfTime();
+      }
+
+      document.getElementById('editModal').classList.remove('hidden');
+    }
+
+    function closeEditModal() { 
+      document.getElementById('editModal').classList.add('hidden'); 
+    }
+
+    function autoFillMyTime() {
+      const type = document.getElementById('selectMyShiftType').value;
+      const s = document.getElementById('inputMyTimeStart');
+      const e = document.getElementById('inputMyTimeEnd');
+      if (type === '조근') { s.value = '05:00'; e.value = '13:00'; }
+      else if (type === '공휴일조근') { s.value = '05:00'; e.value = '09:00'; }
+      else if (type === '석근') { s.value = '13:00'; e.value = '21:00'; }
+      else if (type === '석1') { s.value = '12:00'; e.value = '20:00'; }
+      else if (type === '일근') { s.value = '09:00'; e.value = '18:00'; }
+      else if (['O', '대휴', '연차', '휴가'].includes(type)) { s.value = ''; e.value = ''; }
+    }
+
+    function autoFillGfTime() {
+      const type = document.getElementById('selectGfShiftType').value;
+      const s = document.getElementById('inputGfTimeStart');
+      const e = document.getElementById('inputGfTimeEnd');
+      if (type === 'ISA' || type === 'GSA') { s.value = '06:30'; e.value = '11:30'; }
+      else if (type === 'ISD') { s.value = '18:30'; e.value = '21:30'; }
+      else if (type === 'SBY') { s.value = '06:00'; e.value = '19:00'; }
+      else if (type === 'TR') { s.value = '08:00'; e.value = '17:00'; }
+      else if (type === 'OFF') { s.value = ''; e.value = ''; }
+    }
+
+    function saveModalChanges() {
+      const dStart = document.getElementById('inputDateTimeStart').value;
+      const dEnd = document.getElementById('inputDateTimeEnd').value;
+      const dMemo = document.getElementById('inputDateMemo').value;
+      const myPromiseVal = document.getElementById('inputMyPromise').value.trim();
+      const gfPromiseVal = document.getElementById('inputGfPromise').value.trim();
+
+      const mySelectVal = document.getElementById('selectMyShiftType').value;
+      const myFinalType = (mySelectVal === '기타') 
+        ? (document.getElementById('inputMyShiftCustom').value.trim() || '기타') 
+        : mySelectVal;
+
+      const myObj = {
+        type: myFinalType,
+        start: document.getElementById('inputMyTimeStart').value,
+        end: document.getElementById('inputMyTimeEnd').value
+      };
+
+      const gfSelectVal = document.getElementById('selectGfShiftType').value;
+      const gfFinalType = (gfSelectVal === '기타')
+        ? (document.getElementById('inputGfShiftCustom').value.trim() || '기타')
+        : gfSelectVal;
+
+      const gStart = document.getElementById('inputGfTimeStart').value;
+      const gEnd = document.getElementById('inputGfTimeEnd').value;
+
+      const gfObj = {
+        type: gfFinalType,
+        destination: document.getElementById('inputGfDestination').value.trim(),
+        start: gStart,
+        end: gEnd,
+        isQuickTurn: (gfFinalType === '퀵턴'),
+        isPureStay: (gfFinalType === '체류' && !gStart && !gEnd)
+      };
+
+      const dateObj = (dStart || dEnd || dMemo) ? {
+        time: dStart && dEnd ? `${dStart}~${dEnd}` : (dStart || dEnd || ''),
+        memo: dMemo
+      } : null;
+
+      const targetDates = [];
+      if (currentEditMode === 'range') {
+        const rStartStr = document.getElementById('inputRangeStart').value;
+        const rEndStr = document.getElementById('inputRangeEnd').value;
+        if (!rStartStr || !rEndStr) {
+          alert("시작일과 종료일을 선택해 주세요.");
+          return;
+        }
+        const sD = new Date(rStartStr);
+        const eD = new Date(rEndStr);
+        if (sD > eD) {
+          alert("종료일은 시작일보다 이후여야 합니다.");
+          return;
+        }
+        for (let cur = new Date(sD); cur <= eD; cur.setDate(cur.getDate() + 1)) {
+          const y = cur.getFullYear();
+          const m = String(cur.getMonth() + 1).padStart(2, '0');
+          const d = String(cur.getDate()).padStart(2, '0');
+          targetDates.push(`${y}-${m}-${d}`);
+        }
+      } else {
+        targetDates.push(selectedDateKey);
+      }
+
+      targetDates.forEach(dtKey => {
+        if (!scheduleDB[dtKey]) scheduleDB[dtKey] = {};
+        scheduleDB[dtKey].my = { ...myObj };
+        scheduleDB[dtKey].gf = { ...gfObj };
+        scheduleDB[dtKey].date = dateObj ? { ...dateObj } : null;
+        scheduleDB[dtKey].myPromise = myPromiseVal;
+        scheduleDB[dtKey].gfPromise = gfPromiseVal;
+      });
+
+      saveDB();
+      closeEditModal();
+      renderCalendar();
+
+      if (currentEditMode === 'range') {
+        alert(`${targetDates.length}일 동안의 일정이 일괄 변경되었습니다!`);
+      }
+    }
+
+    // =========================================================
+    // 8. 엑셀 파서 & Gemini AI Vision
+    // =========================================================
+    function onFileSelected(who) {
+      if (who === 'kyuho') {
+        const file = document.getElementById('kyuhoFile').files[0];
+        if (file) document.getElementById('kyuhoAppliedFileName').innerText = `선택됨: ${file.name}`;
+      } else if (who === 'yejin') {
+        const file = document.getElementById('yejinImageFile').files[0];
+        if (file) {
+          document.getElementById('yejinAppliedFileName').innerText = `선택됨: ${file.name}`;
+          const mKey = `${uploadTargetYear}-${String(uploadTargetMonth).padStart(2, '0')}`;
+          compressAndStoreYejinImage(file, mKey);
+        }
+      }
+    }
+
+    function openUploadModalForCurrentMonth() {
+      setUploadTargetMonth(currentYear, currentMonth);
+      const savedKey = localStorage.getItem('gemini_api_key') || '';
+      const keyInput = document.getElementById('geminiApiKey');
+      if (keyInput) keyInput.value = savedKey;
+
+      const savedDb = localStorage.getItem('firebase_db_url') || DEFAULT_FIREBASE_URL;
+      const dbInput = document.getElementById('firebaseDbUrl');
+      if (dbInput) dbInput.value = savedDb;
+
+      document.getElementById('uploadModal').classList.remove('hidden');
+    }
+
+    function closeUploadModal() {
+      document.getElementById('uploadModal').classList.add('hidden');
+    }
+
+    function setUploadTargetMonth(year, month) {
+      uploadTargetYear = year;
+      uploadTargetMonth = month;
+
+      document.getElementById('modalTargetMonthTitle').innerText = `${year}년 ${month}월`;
+      document.querySelectorAll('.uploadTargetMonthText').forEach(el => el.innerText = `${month}월`);
+      document.getElementById('selectUploadYear').value = year;
+      document.getElementById('selectUploadMonth').value = month;
+
+      document.getElementById('kyuhoFile').value = '';
+      document.getElementById('yejinImageFile').value = '';
+
+      const mKey = `${year}-${String(month).padStart(2, '0')}`;
+      const hist = fileHistory[mKey] || {};
+      document.getElementById('kyuhoAppliedFileName').innerText = hist.kyuho || '등록된 파일 없음';
+      document.getElementById('yejinAppliedFileName').innerText = hist.yejin || '등록된 파일 없음';
+
+      updateUploadModalStatus();
+    }
+
+    function onMonthSelectorChange() {
+      const y = parseInt(document.getElementById('selectUploadYear').value, 10);
+      const m = parseInt(document.getElementById('selectUploadMonth').value, 10);
+      setUploadTargetMonth(y, m);
+    }
+
+    function updateUploadModalStatus() {
+      const totalDays = new Date(uploadTargetYear, uploadTargetMonth, 0).getDate();
+      let kCount = 0;
+      let yCount = 0;
+
+      for (let d = 1; d <= totalDays; d++) {
+        const dKey = `${uploadTargetYear}-${String(uploadTargetMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        if (scheduleDB[dKey]?.my?.type && scheduleDB[dKey]?.my?.type !== '-') kCount++;
+        if (scheduleDB[dKey]?.gf?.type) yCount++;
+      }
+
+      document.getElementById('statusKyuhoMonthCount').innerText = kCount > 0 ? `${kCount}일 등록됨` : '미등록';
+      document.getElementById('statusYejinMonthCount').innerText = yCount > 0 ? `${yCount}일 등록됨` : '미등록';
+    }
+
+    function clearTargetMonthData() {
+      if (confirm(`${uploadTargetYear}년 ${uploadTargetMonth}월의 근무 데이터를 비우시겠습니까?`)) {
+        const totalDays = new Date(uploadTargetYear, uploadTargetMonth, 0).getDate();
+        for (let d = 1; d <= totalDays; d++) {
+          const dKey = `${uploadTargetYear}-${String(uploadTargetMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+          delete scheduleDB[dKey];
+        }
+        const mKey = `${uploadTargetYear}-${String(uploadTargetMonth).padStart(2, '0')}`;
+        delete fileHistory[mKey];
+        localStorage.removeItem(`yejin_sched_img_${mKey}`);
+
+        saveDB();
+        renderCalendar();
+        updateUploadModalStatus();
+        setUploadTargetMonth(uploadTargetYear, uploadTargetMonth);
+        alert(`${uploadTargetYear}년 ${uploadTargetMonth}월 데이터가 초기화되었습니다.`);
+      }
+    }
+
+    function toggleApiKeyInput() {
+      const box = document.getElementById('apiKeyInputBox');
+      if (box) box.classList.toggle('hidden');
+    }
+
+    async function processUploadFiles() {
+      const btn = document.getElementById('btnStartScan');
+      const originalBtnHtml = btn ? btn.innerHTML : '';
+
+      try {
+        const kFile = document.getElementById('kyuhoFile').files[0];
+        const yFile = document.getElementById('yejinImageFile').files[0];
+        const quickText = document.getElementById('quickScheduleInput').value.trim();
+        const apiKey = document.getElementById('geminiApiKey').value.trim();
+        const dbUrl = document.getElementById('firebaseDbUrl').value.trim();
+
+        if (apiKey) safeSetStorage('gemini_api_key', apiKey);
+        if (dbUrl) {
+          safeSetStorage('firebase_db_url', dbUrl);
+          updateSyncBadge(true);
+        }
+
+        const mKey = `${uploadTargetYear}-${String(uploadTargetMonth).padStart(2, '0')}`;
+        if (!fileHistory[mKey]) fileHistory[mKey] = {};
+
+        if (kFile) {
+          await parseKyuhoExcelForTargetMonth(kFile);
+          fileHistory[mKey].kyuho = kFile.name;
+        }
+
+        if (quickText) {
+          applyQuickTextInput(quickText);
+        }
+
+        if (yFile) {
+          await compressAndStoreYejinImage(yFile, mKey);
+
+          if (!apiKey) {
+            alert("사진 자동인식을 위해 Gemini API 키를 입력해 주세요. (사진은 원본급으로 보관되었습니다)");
+            return;
+          }
+
+          if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin text-[10px]"></i> AI 분석 중...';
+          }
+
+          const progressBox = document.getElementById('ocrProgressBox');
+          const statusText = document.getElementById('ocrStatusText');
+          const progressBar = document.getElementById('ocrProgressBar');
+          const percentText = document.getElementById('ocrPercent');
+
+          if (progressBox) {
+            progressBox.classList.remove('hidden');
+            progressBar.style.width = '35%';
+            percentText.innerText = '35%';
+            statusText.innerText = 'gemini-3.6-flash 출퇴근 정밀 판독 중...';
+          }
+
+          await runGemini36FlashVision(yFile, apiKey, (p, msg) => {
+            if (progressBar) progressBar.style.width = `${p}%`;
+            if (percentText) percentText.innerText = `${p}%`;
+            if (statusText) statusText.innerText = msg;
+          });
+
+          fileHistory[mKey].yejin = yFile.name;
+        }
+
+        saveDB();
+        currentYear = uploadTargetYear;
+        currentMonth = uploadTargetMonth;
+        selectedDateKey = `${currentYear}-${String(currentMonth).padStart(2,'0')}-01`;
+        renderCalendar();
+
+        alert(`${uploadTargetYear}년 ${uploadTargetMonth}월 근무표가 성공적으로 캘린더에 반영되었습니다!`);
+        closeUploadModal();
+      } catch (err) {
+        console.error("업로드 오류:", err);
+        alert("업로드 중 문제가 발생했습니다:\n" + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalBtnHtml;
+        }
+        const progressBox = document.getElementById('ocrProgressBox');
+        if (progressBox) progressBox.classList.add('hidden');
+      }
+    }
+
+    function applyQuickTextInput(text) {
+      const items = text.split(/[\n,]+/);
+      items.forEach(item => {
+        const trimmed = item.trim();
+        if (!trimmed) return;
+
+        const rangeMatch = trimmed.match(/^(\d{1,2})\s*[-~]\s*(\d{1,2})\s+(.+)$/);
+        if (rangeMatch) {
+          const s = parseInt(rangeMatch[1], 10);
+          const e = parseInt(rangeMatch[2], 10);
+          const val = rangeMatch[3].trim();
+          for (let d = s; d <= e; d++) applyDayDuty(d, val);
+          return;
+        }
+
+        const singleMatch = trimmed.match(/^(\d{1,2})\s+(.+)$/);
+        if (singleMatch) {
+          const d = parseInt(singleMatch[1], 10);
+          const val = singleMatch[2].trim();
+          applyDayDuty(d, val);
+        }
+      });
+    }
+
+    function applyDayDuty(d, val) {
+      const dKey = `${uploadTargetYear}-${String(uploadTargetMonth).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      if (!scheduleDB[dKey]) scheduleDB[dKey] = {};
+
+      if (val.includes('OFF')) {
+        scheduleDB[dKey].gf = { type: 'OFF', destination: '', isQuickTurn: false };
+      } else if (val.includes('SBY')) {
+        scheduleDB[dKey].gf = { type: 'SBY', destination: '', start: '06:00', end: '19:00', isQuickTurn: false };
+      } else if (val.includes('ISD')) {
+        scheduleDB[dKey].gf = { type: 'ISD', destination: '', start: '18:30', end: '21:30', isQuickTurn: false };
+      } else if (val.includes('ISA') || val.includes('GSA')) {
+        scheduleDB[dKey].gf = { type: val, destination: '', start: '06:30', end: '11:30', isQuickTurn: false };
+      } else if (val.includes('TR')) {
+        scheduleDB[dKey].gf = { type: 'TR', destination: '', start: '08:00', end: '17:00', isQuickTurn: false };
+      } else {
+        const isStay = isStayFlight(val) || val.includes('체류') || val.includes('L/O');
+        const cleanDest = val.replace('퀵턴','').replace('체류','').replace('L/O','').trim();
+        scheduleDB[dKey].gf = {
+          type: isStay ? '체류' : '퀵턴',
+          destination: cleanDest,
+          start: isStay ? '' : '06:00',
+          end: isStay ? '' : '13:30',
+          isQuickTurn: !isStay,
+          isPureStay: isStay
+        };
+      }
+    }
+
+    async function fetchWithRetry(url, options, maxRetries = 2) {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const response = await fetch(url, options);
+        if (response.status === 503 && attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, 1500));
+          continue;
+        }
+        return response;
+      }
+    }
+
+    async function runGemini36FlashVision(file, apiKey, onProgress) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          try {
+            const base64Data = e.target.result.split(',')[1];
+            onProgress(50, "gemini-3.6-flash AI 분석 중...");
+
+            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
+
+            const prompt = `이 이미지는 티웨이항공 승무원의 모바일 월간 근무표 달력 캡처 사진입니다.
+1. 사진 상단에 표시된 연도(year)와 월(month)을 먼저 정확히 파악하세요.
+2. 1일부터 말일까지의 스케줄을 분석하여 반드시 아래 JSON 형식으로만 응답하세요. 설명이나 마크다운 코드블록은 일체 쓰지 마세요.
+
+형식:
+{
+  "year": 2026,
+  "month": 10,
+  "schedule": [
+    { "day": 16, "type": "체류", "destination": "싱가포르", "start": "13:50", "end": "21:30" },
+    { "day": 17, "type": "체류", "destination": "싱가포르", "start": "21:50", "end": "06:45", "isInbound": true },
+    { "day": 18, "type": "체류", "destination": "싱가포르", "start": "", "end": "", "isArrivalOnly": true }
+  ]
+}
+
+규칙:
+- 체류 비행 중 전날 밤 출발해 아침에 도착하는 비행의 도착 당일(마지막 날)은 start와 end를 빈 문자열("")로 두고 isArrivalOnly: true로 표시하세요.
+- 비행 없이 호텔에 온전히 머무는 날(L/O)은 start와 end를 빈 문자열("")로 두고 isPureStay: true로 표시하세요.
+- 부산, 제주 등 지방 체류 N레그 일정은 destination을 해당 체류 도시(부산 등)로 적어주세요.
+- OFF: type: "OFF", SBY: type: 해당 명칭, TR: type: "TR"`;
+
+            const response = await fetchWithRetry(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    { text: prompt },
+                    { inlineData: { mimeType: file.type || "image/jpeg", data: base64Data } }
+                  ]
+                }]
+              })
+            });
+
+            const resData = await response.json();
+            if (resData.error) {
+              throw new Error(`Google API (${resData.error.code}): ${resData.error.message}`);
+            }
+
+            if (!resData.candidates || !resData.candidates[0] || !resData.candidates[0].content) {
+              throw new Error("AI 분석 결과가 비어있습니다.");
+            }
+
+            let rawText = resData.candidates[0].content.parts[0].text.trim();
+            rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+            const jsonStart = rawText.indexOf('{');
+            const jsonEnd = rawText.lastIndexOf('}');
+            if (jsonStart !== -1 && jsonEnd !== -1) {
+              rawText = rawText.substring(jsonStart, jsonEnd + 1);
+            }
+
+            const parsed = JSON.parse(rawText);
+
+            const targetY = (parsed.year && parsed.year >= 2025 && parsed.year <= 2040) ? parsed.year : uploadTargetYear;
+            const targetM = (parsed.month && parsed.month >= 1 && parsed.month <= 12) ? parsed.month : uploadTargetMonth;
+
+            uploadTargetYear = targetY;
+            uploadTargetMonth = targetM;
+
+            let scheduleArray = Array.isArray(parsed.schedule) ? parsed.schedule : (Array.isArray(parsed.days) ? parsed.days : []);
+
+            scheduleArray.forEach(item => {
+              const d = item.day;
+              if (!d || d < 1 || d > 31) return;
+              const dKey = `${targetY}-${String(targetM).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+              if (!scheduleDB[dKey]) scheduleDB[dKey] = {};
+
+              const rawType = String(item.type || '').trim().toUpperCase();
+              const dest = item.destination ? String(item.destination).trim() : "";
+              const isStay = (rawType === '체류' || rawType === 'L/O' || isStayFlight(dest));
+              const isNight = Boolean(item.isNightTurn) || (dest.includes('우한') || (item.end && item.end <= '06:00'));
+              const isPure = Boolean(item.isPureStay) || (isStay && !item.start && !item.end && !item.isArrivalOnly);
+
+              if (rawType.includes('OFF')) {
+                scheduleDB[dKey].gf = { type: 'OFF', destination: '', isQuickTurn: false };
+              } else if (rawType.includes('SB') || rawType.includes('IS') || rawType.includes('GS')) {
+                scheduleDB[dKey].gf = {
+                  type: rawType.includes('ISD') ? 'ISD' : (rawType.includes('ISA') ? 'ISA' : (rawType.includes('GSA') ? 'GSA' : 'SBY')),
+                  destination: '',
+                  start: item.start || '06:00',
+                  end: item.end || '19:00',
+                  isQuickTurn: false
+                };
+              } else if (rawType === 'TR' || rawType.includes('훈련')) {
+                scheduleDB[dKey].gf = { type: 'TR', destination: '', start: '08:00', end: '17:00', isQuickTurn: false };
+              } else {
+                scheduleDB[dKey].gf = {
+                  type: isStay ? '체류' : '퀵턴',
+                  destination: dest || (isStay ? '체류' : '비행'),
+                  flight: item.flight || '',
+                  start: item.start || '',
+                  end: item.end || '',
+                  isQuickTurn: !isStay,
+                  isNightTurn: isNight,
+                  isPureStay: isPure,
+                  isInbound: Boolean(item.isInbound),
+                  isArrivalOnly: Boolean(item.isArrivalOnly)
+                };
+              }
+            });
+
+            onProgress(100, "분석 완료!");
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function parseKyuhoExcelForTargetMonth(file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array', cellStyles: true });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+            if (sheet['!merges'] && Array.isArray(sheet['!merges'])) {
+              sheet['!merges'].forEach(m => {
+                const startAddr = XLSX.utils.encode_cell(m.s);
+                const startCell = sheet[startAddr];
+                if (startCell && startCell.v !== undefined) {
+                  for (let R = m.s.r; R <= m.e.r; R++) {
+                    for (let C = m.s.c; C <= m.e.c; C++) {
+                      const cellAddr = XLSX.utils.encode_cell({ r: R, c: C });
+                      sheet[cellAddr] = {
+                        t: startCell.t,
+                        v: startCell.v,
+                        w: startCell.w,
+                        s: startCell.s
+                      };
+                    }
+                  }
+                }
+              });
+            }
+
+            const range = XLSX.utils.decode_range(sheet['!ref']);
+            let targetRow = -1;
+            let dateHeaderRow = -1;
+            let maxCount = 0;
+
+            for (let R = range.s.r; R <= range.e.r; ++R) {
+              for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cell = sheet[XLSX.utils.encode_cell({ r: R, c: C })];
+                if (!cell || cell.v === undefined) continue;
+                if (String(cell.v).replace(/\s+/g, '') === '이규호') {
+                  targetRow = R;
+                  break;
+                }
+              }
+              if (targetRow !== -1) break;
+            }
+
+            for (let R = range.s.r; R <= Math.min(range.e.r, 15); ++R) {
+              let cnt = 0;
+              for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cell = sheet[XLSX.utils.encode_cell({ r: R, c: C })];
+                if (cell && cell.v !== undefined) {
+                  const num = parseInt(String(cell.v).trim(), 10);
+                  if (!isNaN(num) && num >= 1 && num <= 31) cnt++;
+                }
+              }
+              if (cnt > maxCount) { maxCount = cnt; dateHeaderRow = R; }
+            }
+
+            if (targetRow !== -1 && dateHeaderRow !== -1) {
+              const colToDayMap = {};
+              for (let C = range.s.c; C <= range.e.c; ++C) {
+                const cell = sheet[XLSX.utils.encode_cell({ r: dateHeaderRow, c: C })];
+                if (cell && cell.v !== undefined) {
+                  const d = parseInt(String(cell.v).trim(), 10);
+                  if (!isNaN(d) && d >= 1 && d <= 31) colToDayMap[C] = d;
+                }
+              }
+
+              for (const [colIdx, dayNum] of Object.entries(colToDayMap)) {
+                const cellCoord = { r: targetRow, c: parseInt(colIdx, 10) };
+                const cellAddr = XLSX.utils.encode_cell(cellCoord);
+                const cell = sheet[cellAddr];
+                const dKey = `${uploadTargetYear}-${String(uploadTargetMonth).padStart(2,'0')}-${String(dayNum).padStart(2,'0')}`;
+                
+                let rawVal = cell && cell.v !== undefined ? String(cell.v).trim() : '';
+
+                // 분홍색/마젠타 셀 휴가 판정
+                if (!rawVal && cell && cell.s) {
+                  const fg = cell.s.fgColor || cell.s.bgColor;
+                  if (fg) {
+                    const rgb = String(fg.rgb || fg.theme || '').toUpperCase();
+                    if (rgb.includes('FFC') || rgb.includes('FFB') || rgb.includes('FFA') || rgb.includes('PINK') || rgb.includes('F4C')) {
+                      rawVal = '휴가';
+                    }
+                  }
+                }
+
+                if (!scheduleDB[dKey]) scheduleDB[dKey] = {};
+                scheduleDB[dKey].my = parseKyuhoShiftRule(rawVal, dKey);
+              }
+            }
+          } catch (err) {
+            console.error(err);
+          }
+          resolve();
+        };
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    function parseKyuhoShiftRule(val, dateKey) {
+      if (!val || val === '') return { type: '-', start: '', end: '' };
+      const d = new Date(dateKey);
+      const isHolidayOrWeekend = (d.getDay() === 0 || d.getDay() === 6) || Boolean(HOLIDAYS[dateKey]);
+
+      if (val.includes('석1')) return { type: '석1', start: '12:00', end: '20:00' };
+      if (val.includes('석근') || val === '석') return { type: '석근', start: '13:00', end: '21:00' };
+      if (val.includes('일근') || val === '일') return { type: '일근', start: '09:00', end: '18:00' };
+      if (val.includes('TS-3')) return { type: 'TS-3', start: '', end: '' };
+      if (val.includes('TS-1')) return { type: 'TS-1', start: '', end: '' };
+      if (val.includes('연수')) return { type: '연수', start: '', end: '' };
+
+      if (val.includes('조근') || val === '조') {
+        if (isHolidayOrWeekend) return { type: '공휴일조근', start: '05:00', end: '09:00' };
+        return { type: '조근', start: '05:00', end: '13:00' };
+      }
+
+      if (val === 'O' || val === 'o') return { type: 'O', start: '', end: '' };
+      if (val.includes('대휴')) return { type: '대휴', start: '', end: '' };
+      if (val.includes('휴가') || val.includes('연차')) return { type: '휴가', start: '', end: '' };
+
+      return { type: val, start: '', end: '' };
+    }
+
+    // =========================================================
+    // 9. 기념일 관리
+    // =========================================================
+    function openAnniversaryModal() {
+      renderCustomAnivList();
+      document.getElementById('anniversaryModal').classList.remove('hidden');
+    }
+
+    function closeAnniversaryModal() {
+      document.getElementById('anniversaryModal').classList.add('hidden');
+    }
+
+    function renderCustomAnivList() {
+      const cBox = document.getElementById('customList');
+      if (!cBox) return;
+      cBox.innerHTML = '';
+      customAnniversaries.forEach((aniv, idx) => {
+        cBox.innerHTML += `
+          <div class="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200">
+            <span class="font-bold text-amber-700">🎂 ${aniv.name} ${aniv.isRepeat ? '<span class="text-[9px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded">매년 반복</span>' : ''}</span>
+            <div class="flex items-center space-x-2">
+              <span class="font-mono text-slate-600">${aniv.date}</span>
+              <button onclick="deleteCustomAniv(${idx})" class="text-slate-400 hover:text-red-500"><i class="fa-solid fa-trash-can"></i></button>
+            </div>
+          </div>`;
+      });
+    }
+
+    function addCustomAnniversary() {
+      const name = document.getElementById('customAnivName').value.trim();
+      const date = document.getElementById('customAnivDate').value;
+      const isRepeat = document.getElementById('customAnivRepeat').checked;
+      if (!name || !date) {
+        alert('기념일 이름과 날짜를 입력하세요.');
+        return;
+      }
+      customAnniversaries.push({ name, date, isRepeat });
+      saveDB();
+      renderCustomAnivList();
+      renderCalendar();
+      document.getElementById('customAnivName').value = '';
+    }
+
+    function deleteCustomAniv(idx) {
+      customAnniversaries.splice(idx, 1);
+      saveDB();
+      renderCustomAnivList();
+      renderCalendar();
+    }
+
+    // =========================================================
+    // 10. 초기화 및 즉시 안전 가드 실행
+    // =========================================================
+    function initApp() {
+      try {
+        initYearSelector();
+        renderCalendar();
+        updateDetailCard();
+        if (navigator.onLine) {
+          loadFromFirebase(false);
+        }
+      } catch (err) {
+        console.error("초기화 예외 발생 복구:", err);
+        // 에러 발생 시 마스터 데이터로 긴급 렌더링
+        scheduleDB = MASTER_SCHEDULE_DB;
+        renderCalendar();
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', initApp);
+    window.addEventListener('online', () => { loadFromFirebase(false); });
+    initApp();
+  </script>
+</body>
+</html>
