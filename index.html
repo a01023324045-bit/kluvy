@@ -470,6 +470,15 @@
         </div>
         <div id="cloudSyncInputBox" class="space-y-1 pt-1">
           <input type="text" id="firebaseDbUrl" onchange="onFirebaseUrlChanged()" oninput="onFirebaseUrlChanged()" placeholder="https://yktable-f14fe-default-rtdb.asia-southeast1.firebasedatabase.app/" class="w-full text-xs p-1.5 rounded border border-indigo-200 bg-white font-mono text-[11px]" />
+          <div id="fbLoginBox" class="space-y-1 pt-1">
+            <p id="fbLoginStatus" class="text-[10px] font-bold text-slate-500">동기화 계정: 로그인 안 됨</p>
+            <div id="fbLoginForm" class="space-y-1">
+              <input type="email" id="fbLoginEmail" autocomplete="username" placeholder="동기화 계정 이메일" class="w-full text-xs p-1.5 rounded border border-indigo-200 bg-white" />
+              <input type="password" id="fbLoginPw" autocomplete="current-password" placeholder="비밀번호" class="w-full text-xs p-1.5 rounded border border-indigo-200 bg-white" />
+              <button type="button" onclick="fbLoginFromForm()" class="w-full text-[11px] bg-indigo-600 text-white py-1 rounded font-bold">로그인</button>
+            </div>
+            <button type="button" id="fbLogoutBtn" onclick="fbLogout()" class="hidden text-[10px] text-slate-500 underline">로그아웃</button>
+          </div>
         </div>
       </div>
 
@@ -631,6 +640,114 @@
       safeSetStorage('firebase_db_url', DEFAULT_FIREBASE_URL);
     }
 
+    // ===== Firebase 인증 (두 사람 전용 동기화) =====
+    // Firebase 콘솔 > 프로젝트 설정 > 일반 > "웹 API 키" 값을 넣으세요. (공개돼도 되는 식별자, 비밀 아님)
+    const FIREBASE_WEB_API_KEY = "AIzaSyB3AlyaRjHoEdnPt9L1BUjj5ML7EtonVp0";
+    let fbIdToken = null;
+    let fbIdTokenExp = 0;
+    let fbRefreshPromise = null;
+
+    function fbIsLoggedIn() {
+      return Boolean(localStorage.getItem('fb_refresh_token'));
+    }
+
+    // REST 요청 URL 끝에 붙일 인증 쿼리. 로그인 전이면 빈 문자열.
+    async function getFbAuthQuery() {
+      const refresh = localStorage.getItem('fb_refresh_token');
+      if (!FIREBASE_WEB_API_KEY || !refresh) return '';
+      if (fbIdToken && Date.now() < fbIdTokenExp - 60000) return `?auth=${encodeURIComponent(fbIdToken)}`;
+      if (!fbRefreshPromise) {
+        fbRefreshPromise = (async () => {
+          const res = await fetch(`https://securetoken.googleapis.com/v1/token?key=${FIREBASE_WEB_API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refresh)}`
+          });
+          if (!res.ok) {
+            if (res.status === 400) { // 토큰 만료/폐기 → 재로그인 필요
+              localStorage.removeItem('fb_refresh_token');
+              updateFbLoginUI();
+            }
+            throw new Error('토큰 갱신 실패: ' + res.status);
+          }
+          const d = await res.json();
+          fbIdToken = d.id_token;
+          fbIdTokenExp = Date.now() + Number(d.expires_in || 3600) * 1000;
+          localStorage.setItem('fb_refresh_token', d.refresh_token);
+        })().finally(() => { fbRefreshPromise = null; });
+      }
+      try { await fbRefreshPromise; } catch (e) { console.warn(e); return ''; }
+      return fbIdToken ? `?auth=${encodeURIComponent(fbIdToken)}` : '';
+    }
+
+    async function fbLogin(email, password) {
+      if (!FIREBASE_WEB_API_KEY) throw new Error('앱에 Firebase 웹 API 키가 설정되지 않았습니다.');
+      const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_WEB_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, returnSecureToken: true })
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        const code = (d.error && d.error.message) || '';
+        const msgMap = {
+          INVALID_LOGIN_CREDENTIALS: '이메일 또는 비밀번호가 틀렸습니다.',
+          INVALID_PASSWORD: '비밀번호가 틀렸습니다.',
+          EMAIL_NOT_FOUND: '등록되지 않은 이메일입니다.',
+          INVALID_EMAIL: '이메일 형식이 올바르지 않습니다.',
+          USER_DISABLED: '사용 중지된 계정입니다.'
+        };
+        const key = Object.keys(msgMap).find(k => code.startsWith(k));
+        throw new Error(key ? msgMap[key] : (code.startsWith('TOO_MANY_ATTEMPTS') ? '시도가 너무 많습니다. 잠시 후 다시 해 주세요.' : (code || '로그인 실패')));
+      }
+      fbIdToken = d.idToken;
+      fbIdTokenExp = Date.now() + Number(d.expiresIn || 3600) * 1000;
+      localStorage.setItem('fb_refresh_token', d.refreshToken);
+      localStorage.setItem('fb_login_email', d.email || email);
+    }
+
+    async function fbLoginFromForm() {
+      const email = (document.getElementById('fbLoginEmail').value || '').trim();
+      const pwInput = document.getElementById('fbLoginPw');
+      if (!email || !pwInput.value) { alert('이메일과 비밀번호를 입력해 주세요.'); return; }
+      try {
+        await fbLogin(email, pwInput.value);
+        pwInput.value = '';
+        updateFbLoginUI();
+        alert('로그인 완료! 이제 동기화가 다시 동작합니다.');
+        loadFromFirebase(false);
+      } catch (e) {
+        alert('로그인 실패: ' + e.message);
+      }
+    }
+
+    function fbLogout() {
+      localStorage.removeItem('fb_refresh_token');
+      localStorage.removeItem('fb_login_email');
+      fbIdToken = null;
+      fbIdTokenExp = 0;
+      updateFbLoginUI();
+      updateSyncBadge(false);
+    }
+
+    function updateFbLoginUI() {
+      const status = document.getElementById('fbLoginStatus');
+      const form = document.getElementById('fbLoginForm');
+      const logoutBtn = document.getElementById('fbLogoutBtn');
+      if (!status) return;
+      if (fbIsLoggedIn()) {
+        status.textContent = `동기화 계정: ${localStorage.getItem('fb_login_email') || '로그인됨'}`;
+        status.className = 'text-[10px] font-bold text-emerald-600';
+        form && form.classList.add('hidden');
+        logoutBtn && logoutBtn.classList.remove('hidden');
+      } else {
+        status.textContent = '동기화 계정: 로그인 안 됨';
+        status.className = 'text-[10px] font-bold text-slate-500';
+        form && form.classList.remove('hidden');
+        logoutBtn && logoutBtn.classList.add('hidden');
+      }
+    }
+
     function initYearSelector() {
       const select = document.getElementById('selectUploadYear');
       if (!select) return;
@@ -790,9 +907,14 @@
       "2026-10-03": "개천절", "2026-10-05": "대체공휴일", "2026-10-09": "한글날", "2026-12-25": "성탄절"
     };
 
-    function updateSyncBadge(isSynced) {
+    function updateSyncBadge(isSynced, needLogin = false) {
       const badge = document.getElementById('syncStatusBadge');
       if (!badge) return;
+      if (needLogin) {
+        badge.className = "text-[9px] bg-rose-50 text-rose-600 px-1.5 py-0.5 rounded-full font-bold border border-rose-200 cursor-pointer flex items-center";
+        badge.innerHTML = '<i class="fa-solid fa-lock text-[8px] mr-1"></i>로그인 필요';
+        return;
+      }
       const dbUrl = localStorage.getItem('firebase_db_url');
       if (dbUrl && isSynced) {
         badge.className = "text-[9px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold border border-emerald-200 cursor-pointer flex items-center";
@@ -811,19 +933,21 @@
       if (!dbUrl) return;
       try {
         const cleanUrl = dbUrl.replace(/\/+$/, '');
-        await Promise.all([
-          fetch(`${cleanUrl}/schedules.json`, {
+        const authQ = await getFbAuthQuery();
+        const results = await Promise.all([
+          fetch(`${cleanUrl}/schedules.json${authQ}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(scheduleDB)
           }),
-          fetch(`${cleanUrl}/anniversaries.json`, {
+          fetch(`${cleanUrl}/anniversaries.json${authQ}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(customAnniversaries)
           })
         ]);
-        updateSyncBadge(true);
+        if (results.some(r => r.status === 401)) { updateSyncBadge(false, true); return; }
+        updateSyncBadge(results.every(r => r.ok));
       } catch (e) {
         console.warn("Firebase 동기화 실패:", e);
         updateSyncBadge(false);
@@ -835,10 +959,17 @@
       if (!dbUrl) return;
       try {
         const cleanUrl = dbUrl.replace(/\/+$/, '');
+        const authQ = await getFbAuthQuery();
         const [resSched, resAniv] = await Promise.all([
-          fetch(`${cleanUrl}/schedules.json`),
-          fetch(`${cleanUrl}/anniversaries.json`)
+          fetch(`${cleanUrl}/schedules.json${authQ}`),
+          fetch(`${cleanUrl}/anniversaries.json${authQ}`)
         ]);
+
+        if (resSched.status === 401 || resAniv.status === 401) {
+          updateSyncBadge(false, true);
+          if (isManual) alert("동기화하려면 로그인이 필요합니다. 업로드 화면 > 동기화 '설정'에서 로그인해 주세요.");
+          return;
+        }
 
         let updated = false;
 
@@ -894,7 +1025,7 @@
     }
 
     setInterval(() => {
-      if (navigator.onLine) loadFromFirebase(false);
+      if (navigator.onLine && !document.hidden) loadFromFirebase(false);
     }, 3000);
 
     function toggleCloudSyncInput() {
@@ -1377,7 +1508,7 @@
         if (dbUrl) {
           try {
             const cleanUrl = dbUrl.replace(/\/+$/, '');
-            const res = await fetch(`${cleanUrl}/images/${mKey}.json`);
+            const res = await fetch(`${cleanUrl}/images/${mKey}.json${await getFbAuthQuery()}`);
             if (res.ok) {
               const cloudImgObj = await res.json();
               if (cloudImgObj && cloudImgObj.data) {
@@ -1461,7 +1592,7 @@
             if (dbUrl) {
               try {
                 const cleanUrl = dbUrl.replace(/\/+$/, '');
-                await fetch(`${cleanUrl}/images/${mKey}.json`, {
+                await fetch(`${cleanUrl}/images/${mKey}.json${await getFbAuthQuery()}`, {
                   method: 'PUT',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ data: compressed, updatedAt: Date.now() })
@@ -2270,6 +2401,7 @@
     function initApp() {
       try {
         initYearSelector();
+        updateFbLoginUI();
         renderCalendar();
         updateDetailCard();
         if (navigator.onLine) {
