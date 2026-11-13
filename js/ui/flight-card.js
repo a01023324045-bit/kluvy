@@ -95,7 +95,7 @@ function renderSingle(wrap, dateKey, gf, leg, entry) {
   let t = null;
   if (pick && (pick.std || pick.sta)) t = computeFlightTimes({ dep, arr, std: pick.std, sta: pick.sta }, dateKey);
   if (t) {
-    const a = timeLine('이륙', t.dep, dateKey, pick.depTag);
+    const a = timeLine(pick.depLabel || '이륙', t.dep, dateKey, pick.depTag);
     const b = timeLine('착륙', t.arr, dateKey, pick.arrTag);
     if (a) wrap.appendChild(a);
     if (b) wrap.appendChild(b);
@@ -162,7 +162,7 @@ export function renderFlightBox(box, dateKey, gf) {
       wrap.appendChild(el('div', 'fl-title', '✈️ 비행 정보'));
       const m = el('div', 'fl-msg', gf.flight
         ? `편명 '${gf.flight}' 을(를) 알아볼 수 없어 예정 시각을 볼 수 없습니다 — 편집창에서 편명을 TW405 처럼 넣으면 AirLabs/편명 시간표로 이륙·착륙 시각을 볼 수 있습니다.`
-        : '편명이 없어 예정 시각을 볼 수 없습니다 — 편집창에서 편명을 넣으면 AirLabs/편명 시간표로 이륙·착륙 시각을 볼 수 있습니다.');
+        : '편명이 없어 예정 시각을 볼 수 없습니다 — [편명 입력]으로 이 날만 넣거나, 근무표 사진을 다시 등록하면 사진에서 편명을 자동으로 채웁니다.');
       m.id = 'flightNoNumber';
       wrap.appendChild(m);
       const links = el('div', 'fl-links');

@@ -46,12 +46,14 @@ export function pickLegTimes({ leg, gf, entry, dateKey, legCount = 1 }) {
   if (!leg) return null;
   const g = gf || {};
   if (leg.source === 'manual' && (leg.std || leg.sta)) {
-    return { kind: 'manual', label: '직접 입력', std: leg.std || '', sta: leg.sta || '', depTag: '', arrTag: '', isAirlabs: false };
+    return { kind: 'manual', label: '직접 입력', std: leg.std || '', sta: leg.sta || '', depTag: '', arrTag: '', depLabel: '이륙', isAirlabs: false };
   }
   const quick = g.isQuickTurn || g.type === '퀵턴';
   if (legCount === 1 && !quick && !g.isPureStay && !g.isArrivalOnly && g.start && g.end && leg.dep && leg.arr) {
     const fromTable = g.timesFrom === 'flightTimes';
-    return { kind: fromTable ? 'timetable' : 'roster', label: fromTable ? `편명 시간표 (${sourceLabel(entry && entry.source)})` : '근무표', std: g.start, sta: g.end, depTag: '', arrTag: '', isAirlabs: false };
+    // 예진 근무표의 두 시각은 '공항 집합 ~ 착륙'이다(2026-11-14 사용자 확인). 시간표가 근무표에서 배운 값이면 첫 시각도 집합.
+    const tableFromRoster = fromTable && (!entry || entry.source === 'schedule');
+    return { kind: fromTable ? 'timetable' : 'roster', label: fromTable ? `편명 시간표 (${sourceLabel(entry && entry.source)})` : '근무표', std: g.start, sta: g.end, depTag: '', arrTag: '', depLabel: (fromTable && !tableFromRoster) ? '이륙' : '집합', isAirlabs: false };
   }
   const live = entry && entry.days && entry.days[dateKey];
   if (live && (live.atd || live.ata || live.etd || live.eta)) {
@@ -59,21 +61,21 @@ export function pickLegTimes({ leg, gf, entry, dateKey, legCount = 1 }) {
     const [std, depTag] = pick(live.atd, live.etd, live.std);
     const [sta, arrTag] = pick(live.ata, live.eta, live.sta);
     const actual = Boolean(live.atd || live.ata);
-    return { kind: actual ? 'actual' : 'estimated', label: `AirLabs ${actual ? '실제' : '예상'} 시각${delaysText(live) ? ` · ${delaysText(live)}` : ''}`, std, sta, depTag, arrTag, isAirlabs: true };
+    return { kind: actual ? 'actual' : 'estimated', label: `AirLabs ${actual ? '실제' : '예상'} 시각${delaysText(live) ? ` · ${delaysText(live)}` : ''}`, std, sta, depTag, arrTag, depLabel: '이륙', isAirlabs: true };
   }
   const sameRoute = e => !e.dep || !leg.dep || e.dep === leg.dep;
   if (entry && (entry.std || entry.sta) && entry.source !== 'airlabs' && sameRoute(entry)) {
-    return { kind: 'timetable', label: `편명 시간표 (${sourceLabel(entry.source)})`, std: entry.std || '', sta: entry.sta || '', depTag: '', arrTag: '', isAirlabs: false };
+    return { kind: 'timetable', label: `편명 시간표 (${sourceLabel(entry.source)})`, std: entry.std || '', sta: entry.sta || '', depTag: '', arrTag: '', depLabel: entry.source === 'schedule' ? '집합' : '이륙', isAirlabs: false };
   }
   if (live && (live.std || live.sta)) {
-    return { kind: 'scheduled', label: 'AirLabs 정기 시각', std: live.std || '', sta: live.sta || '', depTag: '정기', arrTag: '정기', isAirlabs: true };
+    return { kind: 'scheduled', label: 'AirLabs 정기 시각', std: live.std || '', sta: live.sta || '', depTag: '정기', arrTag: '정기', depLabel: '이륙', isAirlabs: true };
   }
   const route = entry && entry.airlabs ? pickRouteVariant(entry.airlabs, dateKey) : null;
   if (route && (route.std || route.sta) && sameRoute(route)) {
-    return { kind: 'scheduled', label: 'AirLabs 정기 노선', std: route.std, sta: route.sta, depTag: '정기', arrTag: '정기', isAirlabs: true };
+    return { kind: 'scheduled', label: 'AirLabs 정기 노선', std: route.std, sta: route.sta, depTag: '정기', arrTag: '정기', depLabel: '이륙', isAirlabs: true };
   }
   if (entry && (entry.std || entry.sta) && sameRoute(entry)) {
-    return { kind: 'scheduled', label: 'AirLabs 정기 시각', std: entry.std || '', sta: entry.sta || '', depTag: '정기', arrTag: '정기', isAirlabs: true };
+    return { kind: 'scheduled', label: 'AirLabs 정기 시각', std: entry.std || '', sta: entry.sta || '', depTag: '정기', arrTag: '정기', depLabel: '이륙', isAirlabs: true };
   }
   return null;
 }

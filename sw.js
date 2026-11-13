@@ -3,7 +3,7 @@
 //   1) CACHE_VERSION 을 올리고  2) 새 파일을 ASSETS 에 추가할 것 (npm test 가 빠진 파일을 잡아낸다)
 // 전략: 앱 파일(html/js/css 등 같은 출처 GET)은 항상 network-first(+재검증) → 실패(오프라인) 시 캐시.
 //       Firebase·Google·CDN 등 다른 출처 요청과 GET 이 아닌 요청은 건드리지 않는다.
-const CACHE_VERSION = 'kluvy-v2.3.1';
+const CACHE_VERSION = 'kluvy-v2.3.2';
 
 const ASSETS = [
   './',
