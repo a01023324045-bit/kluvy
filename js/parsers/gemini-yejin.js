@@ -27,7 +27,13 @@ export const GEMINI_PROMPT = `이 이미지는 트리니티항공(2026-09 티웨
 - 부산, 제주 등 지방 체류 N레그 일정은 destination을 해당 체류 도시(부산 등)로 적어주세요.
 - OFF: type: "OFF", SBY: type: 해당 명칭, TR: type: "TR"
 - 공항 대기(ISA, ISB, ISC, ISD, GSA, GSB, GSC, GSD)는 SBY 로 바꾸지 말고 적힌 코드 그대로 type 에 적고, 칸에 시간이 있으면 start/end 에 적으세요.
-- 시각은 사진에 적힌 그대로(그 공항의 현지시각) "HH:MM" 형식으로 적으세요. 편명·구간이 보이면 flight 에 "TW405 ICN-FCO" 처럼 편명과 출발-도착 공항 코드를 적으세요. (화면에 '티웨이'·'트리니티'·'TW'·'TWB' 어느 쪽으로 보여도 같은 회사입니다)
+- 시각은 사진에 적힌 그대로(그 공항의 현지시각) "HH:MM" 형식으로 적으세요.
+- 편명(flight)을 꼭 찾아 적으세요: 비행 칸(퀵턴·체류 출발/귀국·비행)에 편명 숫자가 보이면 flight 에 적습니다.
+  · 'TW405', 'TWB405', '405', '0405' 처럼 2~4자리 숫자만 보여도 편명입니다 → "TW405" 형식 (앞의 0 은 빼고 TW 를 붙임)
+  · 출발-도착 공항 코드(예: ICN-FCO, ICN→SYD, 인천-로마)가 함께 보이면 "TW405 ICN-FCO" 처럼 3글자 코드로 붙이세요
+  · 한 칸에 왕복 두 편(예: 241/242)이 보이면 "TW241/TW242" 처럼 모두 적으세요
+  · 화면에 '티웨이'·'트리니티'·'TW'·'TWB' 어느 쪽으로 보여도 같은 회사입니다
+  · 숫자가 편명인지 확실하지 않으면(시각·날짜일 수 있으면) 빈 문자열("")로 두세요. 지어내지 마세요.
 - 사진에 없는 날은 넣지 마세요.`;
 
 /** Gemini responseSchema (OpenAPI 부분집합) — 형식 강제 */
@@ -46,7 +52,7 @@ export const YEJIN_SCHEMA = {
           destination: { type: 'STRING' },
           start: { type: 'STRING', description: 'HH:MM 또는 빈 문자열' },
           end: { type: 'STRING', description: 'HH:MM 또는 빈 문자열' },
-          flight: { type: 'STRING' },
+          flight: { type: 'STRING', description: "편명. 예: 'TW405', 'TW405 ICN-FCO', 'TW241/TW242'. 숫자만 보이면 TW 를 붙임. 확실하지 않으면 빈 문자열" },
           isInbound: { type: 'BOOLEAN' },
           isArrivalOnly: { type: 'BOOLEAN' },
           isPureStay: { type: 'BOOLEAN' },

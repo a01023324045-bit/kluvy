@@ -2,6 +2,7 @@
 //
 import { HOLIDAYS } from './holidays.js';
 import { weekdayOfKey } from './dates.js';
+import { STAY_WORDS } from './places.js';
 
 // 데이터 구조 (Firebase schedules/{YYYY-MM-DD} — 필드 의미 변경 금지, 추가만)
 //   my : { type, start, end, manual?, editedAt? }     규호  (manual/editedAt: 3단계 — 편집창에서 직접 넣은 값 표시)
@@ -145,14 +146,11 @@ export function defaultTimesFor(code) {
   return GF_DEFAULT_TIMES[code] ? [...GF_DEFAULT_TIMES[code]] : ['', ''];
 }
 
+/** 체류 비행지인가 — places.js 의 stay 표시(운영본 18곳 + 시드니·자그레브·발리·알마티·아스타나·타슈켄트) + 별칭 */
 export function isStayFlight(dest) {
   if (!dest) return false;
-  const stayDestinations = [
-    "로마", "파리", "바르셀로나", "프랑크푸르트", "밴쿠버", "비슈케크", "자카르타",
-    "싱가포르", "다낭", "나트랑", "푸꾸옥", "사이판", "세부", "치앙마이", "방콕",
-    "칼리보", "부산", "제주체류"
-  ];
-  return stayDestinations.some(d => dest.includes(d));
+  const s = String(dest);
+  return STAY_WORDS.some(d => s.includes(d));
 }
 
 export function calculateBarPosition(startTime, endTime) {

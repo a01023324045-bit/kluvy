@@ -7,7 +7,7 @@
 import { getConfiguredDbUrl } from '../config.js';
 
 // 3단계 디자인: 글자 11px 이상, 글자색 700~800(배경 50 대비 AA), 누르기 쉬운 높이
-const BASE = 'sync-badge text-[11px] leading-none px-2 py-1.5 rounded-full font-bold border cursor-pointer inline-flex items-center whitespace-nowrap';
+const BASE = 'sync-badge text-[11px] leading-none px-2 py-1.5 rounded-full font-semibold border cursor-pointer inline-flex items-center whitespace-nowrap';
 
 /**
  * @param {{status:'live'|'pending'|'offline'|'login'|'error'|'local', pending?:number, mode?:string}} s

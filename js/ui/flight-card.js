@@ -1,6 +1,6 @@
 // 상세 카드의 '✈️ 비행 정보' 상자 — 편명 정규화·실시간 보기 링크·이륙/착륙(현지+KST)·AirLabs 조회 버튼
 // 데이터는 textContent 로만 넣는다.
-import { normalizeFlight, flightLinks, computeFlightTimes, airportCity, dayShift, sourceLabel } from '../flight.js';
+import { normalizeFlight, flightLinks, computeFlightTimes, airportCity, dayShift, sourceLabel, KOREAN_AIRPORTS } from '../flight.js';
 import { getFlightTable, getAirlabsKey, lookupFlightOnAirlabs, onFlightTimesChanged } from '../flight-times.js';
 import { statusKo } from '../airlabs.js';
 
@@ -15,6 +15,23 @@ function el(tag, cls, text) {
   return e;
 }
 
+/** 비행 관련 근무인가 (퀵턴·체류 출발/귀국일·비행·TR). L/O·도착일·OFF·대기(SBY/IS?/GS?)·직접입력 근무는 아님 */
+export function isFlightDuty(gf) {
+  if (!gf || !gf.type || gf.isPureStay || gf.isArrivalOnly) return false;
+  return Boolean(gf.isQuickTurn) || ['퀵턴', '체류', '비행', 'TR'].includes(String(gf.type));
+}
+
+/** [편명 입력] → 그 날짜 편집창을 열고 편명 칸으로 */
+function openEditForFlight() {
+  const open = typeof window !== 'undefined' && window.openEditModal;
+  if (!open) return;
+  open();
+  setTimeout(() => {
+    const inp = document.getElementById('inputGfFlight');
+    if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
+  }, 50);
+}
+
 function mmdd(k) { return k ? `${Number(k.slice(5, 7))}/${Number(k.slice(8, 10))}` : ''; }
 
 function timeLine(label, side, baseKey) {
@@ -25,7 +42,7 @@ function timeLine(label, side, baseKey) {
   let txt = `${side.localDate && side.localDate !== baseKey ? mmdd(side.localDate) + ' ' : ''}${side.local} ${where} 현지`;
   if (side.known && side.kst) {
     const sh = dayShift(baseKey, side.kstDate);
-    txt += side.code && ['ICN', 'GMP', 'PUS', 'CJU', 'TAE', 'CJJ', 'KWJ', 'MWX', 'YNY'].includes(side.code)
+    txt += side.code && KOREAN_AIRPORTS.includes(side.code)
       ? (sh ? ` (${sh > 0 ? '+' : ''}${sh}일)` : '')
       : ` → 한국 ${side.kst}${sh ? ` (${sh > 0 ? '+' : ''}${sh}일)` : ''}`;
   } else if (!side.known) {
@@ -49,7 +66,30 @@ export function renderFlightBox(box, dateKey, gf) {
   lastArgs = [box, dateKey, gf];
   box.innerHTML = '';
   const f = gf && gf.flight ? normalizeFlight(gf.flight) : null;
-  if (!f) { box.classList.add('hidden'); return; }
+  if (!f) {
+    // v2.3.0: 비행 근무인데 편명이 없으면 왜 비행 정보가 없는지 알려 줌 (조용히 숨기지 않음)
+    if (isFlightDuty(gf)) {
+      box.classList.remove('hidden');
+      const wrap = el('div', 'flight-box');
+      wrap.appendChild(el('div', 'fl-title', '✈️ 비행 정보'));
+      const m = el('div', 'fl-msg', gf.flight
+        ? `편명 '${gf.flight}' 을(를) 알아볼 수 없어 예정 시각을 볼 수 없습니다 — 편집창에서 편명을 TW405 처럼 넣으면 AirLabs/편명 시간표로 이륙·착륙 시각을 볼 수 있습니다.`
+        : '편명이 없어 예정 시각을 볼 수 없습니다 — 편집창에서 편명을 넣으면 AirLabs/편명 시간표로 이륙·착륙 시각을 볼 수 있습니다.');
+      m.id = 'flightNoNumber';
+      wrap.appendChild(m);
+      const links = el('div', 'fl-links');
+      const btn = el('button', 'fl-btn', '편명 입력');
+      btn.type = 'button';
+      btn.id = 'btnFlightNumberEdit';
+      btn.addEventListener('click', () => openEditForFlight());
+      links.appendChild(btn);
+      wrap.appendChild(links);
+      box.appendChild(wrap);
+    } else {
+      box.classList.add('hidden');
+    }
+    return;
+  }
   box.classList.remove('hidden');
   const table = getFlightTable();
   const entry = table[f.iata] || null;
@@ -60,8 +100,8 @@ export function renderFlightBox(box, dateKey, gf) {
   const dep = f.dep || (entry && entry.dep) || '';
   const arr = f.arr || (entry && entry.arr) || '';
   title.append(el('span', '', `✈️ ${f.iata}`));
-  if (dep && arr) title.append(el('span', 'text-[13px] font-bold text-slate-600', `${airportCity(dep)}(${dep}) → ${airportCity(arr)}(${arr})`));
-  if (f.multi) title.append(el('span', 'text-[12px] font-bold text-slate-500', '· 왕복 중 첫 편'));
+  if (dep && arr) title.append(el('span', 'text-[13px] font-semibold text-slate-600', `${airportCity(dep)}(${dep}) → ${airportCity(arr)}(${arr})`));
+  if (f.multi) title.append(el('span', 'text-[12px] font-semibold text-slate-500', '· 왕복 중 첫 편'));
   wrap.appendChild(title);
 
   // 이륙·착륙 예정: 근무표(체류 비행)의 시각 → 없으면 편명 시간표
@@ -97,20 +137,20 @@ export function renderFlightBox(box, dateKey, gf) {
     if (live.atd || live.ata) parts.push(`실제 ${live.atd || '-'}→${live.ata || '-'}`);
     if (live.depDelay) parts.push(`출발 ${live.depDelay}분 지연`);
     if (live.arrDelay) parts.push(`도착 ${live.arrDelay}분 지연`);
-    lv.appendChild(el('div', 'font-bold', `🛰️ AirLabs${live.status ? ` · ${statusKo(live.status)}` : ''} (현지시각)`));
+    lv.appendChild(el('div', 'font-semibold', `🛰️ AirLabs${live.status ? ` · ${statusKo(live.status)}` : ''} (현지시각)`));
     lv.appendChild(el('div', '', parts.join(' · ')));
     if (live.fetchedAt && typeof live.fetchedAt === 'number') lv.appendChild(el('div', 'fl-src', `받은 시각 ${new Date(live.fetchedAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`));
     wrap.appendChild(lv);
   } else if (entry && entry.airlabs && (entry.airlabs.std || entry.airlabs.sta)) {
     const lv = el('div', 'fl-live');
-    lv.appendChild(el('div', 'font-bold', '🛰️ AirLabs 정기 노선 (현지시각)'));
+    lv.appendChild(el('div', 'font-semibold', '🛰️ AirLabs 정기 노선 (현지시각)'));
     lv.appendChild(el('div', '', `${entry.airlabs.dep || ''} ${entry.airlabs.std || '-'} → ${entry.airlabs.arr || ''} ${entry.airlabs.sta || '-'}${Array.isArray(entry.airlabs.days) && entry.airlabs.days.length ? ` · 운항 요일 ${entry.airlabs.days.join(',')}` : ''}`));
     wrap.appendChild(lv);
   }
 
   const linkLabel = el('div', 'fl-src', `✈️ ${f.iata} 실시간 보기 (새 창)`);
   linkLabel.style.marginTop = '8px';
-  linkLabel.style.fontWeight = '700';
+  linkLabel.style.fontWeight = '600';
   wrap.appendChild(linkLabel);
   const links = el('div', 'fl-links');
   links.style.marginTop = '4px';
@@ -123,22 +163,29 @@ export function renderFlightBox(box, dateKey, gf) {
     a.prepend(el('i', 'fa-solid fa-arrow-up-right-from-square'));
     links.appendChild(a);
   }
-  if (getAirlabsKey()) {
+  const hasKey = Boolean(getAirlabsKey());
+  if (hasKey) {
     const btn = el('button', 'fl-btn', '예정/실제 시각 불러오기');
     btn.type = 'button';
     btn.id = 'btnAirlabsLookup';
     btn.onclick = async () => {
       btn.disabled = true;
       btn.textContent = '불러오는 중...';
-      const r = await lookupFlightOnAirlabs(gf.flight, dateKey);
-      lastMsg = { key: `${f.iata}|${dateKey}`, text: r.message };
+      let r;
+      try { r = await lookupFlightOnAirlabs(gf.flight, dateKey); } catch (e) { r = { ok: false, message: `조회 중 오류: ${e && e.message ? e.message : e}` }; }
+      lastMsg = { key: `${f.iata}|${dateKey}`, text: r.message, ok: r.ok };
       renderFlightBox(box, dateKey, gf);
     };
     links.appendChild(btn);
   }
   wrap.appendChild(links);
+  if (!hasKey) {
+    const m = el('div', 'fl-msg', '🛰️ AirLabs 키를 넣으면 예정/실제 시각을 볼 수 있습니다 — [N월 등록] → 「✈️ AirLabs (비행 시각 조회, 선택)」 칸에 붙여 넣으세요.');
+    m.id = 'airlabsNoKey';
+    wrap.appendChild(m);
+  }
   if (lastMsg.key === `${f.iata}|${dateKey}` && lastMsg.text) {
-    const m = el('div', 'fl-msg', lastMsg.text);
+    const m = el('div', `fl-msg${lastMsg.ok === false ? ' fl-msg--err' : ''}`, lastMsg.text);
     m.id = 'airlabsMsg';
     wrap.appendChild(m);
   }

@@ -6,7 +6,7 @@ import { state } from '../state.js';
 import { makeDateKey, makeMonthKey } from '../dates.js';
 import { safeSetStorage } from '../storage.js';
 import { saveDB } from '../firebase-sync.js';
-import { renderCalendar } from '../render/calendar.js';
+import { renderCalendar, updateDetailCard } from '../render/calendar.js';
 import { compressImageFile, savePhotoForMonth, deleteLocalPhoto } from './image-modal.js';
 import { parseKyuhoWorkbookData } from '../parsers/excel-kyuho.js';
 import { applyQuickTextInput } from '../parsers/quick-text.js';
@@ -14,10 +14,10 @@ import { recognizeYejinImage, buildYejinPreviewRows, readFileAsBase64 } from '..
 import { recognizeKyuhoImage, buildKyuhoPreviewRows } from '../parsers/gemini-kyuho.js';
 import { getGeminiModel, setGeminiModel } from '../parsers/gemini-client.js';
 import { openRecognizePreview } from './recognize-preview.js';
-import { fillRecoPrefsUI } from './reco-prefs.js';
 import { planUploadRows, applyUploadRows, rowsFromMyMap, rowsFromGfDb, dedupeRows } from '../upload-merge.js';
 import { normalizeFlight, sourceLabel } from '../flight.js';
-import { refreshFlightTimes, fillFromFlightTable, getFlightTable, learnFlightFromGf, getAirlabsKey, setAirlabsKey, airlabsUsageText } from '../flight-times.js';
+import { refreshFlightTimes, fillFromFlightTable, getFlightTable, learnFlightFromGf, getAirlabsKey, setAirlabsKey, airlabsUsageText, pingAirlabs } from '../flight-times.js';
+import { maskKey, cleanAirlabsKey } from '../airlabs.js';
 
 /** 규호 칸에 고른 파일이 사진인가 (jpg/png 등) */
 export function isImageFile(file) {
@@ -52,13 +52,70 @@ export function onApiKeyChanged() {
   safeSetStorage(STORAGE_KEYS.geminiKey, key);
 }
 
-/** AirLabs API 키 (선택 기능 — 이 폰 localStorage 에만 저장) */
-export function onAirlabsKeyChanged() {
+/**
+ * AirLabs API 키 (선택 기능 — 이 폰 localStorage 에만 저장).
+ * v2.3.0: oninput(붙여넣는 즉시) + onchange + 창 닫을 때 한 번 더 저장 — 포커스를 옮기지 않고 창을 닫아도 저장된다.
+ * 앞뒤 공백·줄바꿈·따옴표는 지우고 저장, 입력칸 아래에 '저장됨 (끝 4자 …XXXX)' 로 확인.
+ * @param {Event} [ev] change 이벤트면 입력칸 글자도 정리된 값으로 바꿔 줌 (입력 중에는 커서가 튀지 않게 그대로)
+ */
+export function onAirlabsKeyChanged(ev) {
   const inp = document.getElementById('airlabsApiKey');
   if (!inp) return;
-  setAirlabsKey(inp.value);
+  const saved = setAirlabsKey(inp.value);
+  if (ev && ev.type === 'change' && saved !== null && inp.value !== saved) inp.value = saved;
+  showAirlabsKeyStatus(inp.value, saved);
   const u = document.getElementById('airlabsUsageText');
   if (u) u.textContent = airlabsUsageText();
+}
+
+function showAirlabsKeyStatus(raw, saved) {
+  const st = document.getElementById('airlabsKeyStatus');
+  if (!st) return;
+  const k = saved === undefined ? getAirlabsKey() : saved;
+  st.classList.remove('text-emerald-700', 'text-rose-700', 'text-slate-500');
+  if (k === null) { st.textContent = '⚠️ 저장하지 못했습니다 (브라우저 저장소 오류 — 사생활 보호 모드·저장공간 부족). 앱을 다시 열어 보세요.'; st.classList.add('text-rose-700'); showAirlabsKeyWarn(''); return; }
+  if (!k) { st.textContent = '키 없음 — 붙여 넣으면 바로 저장됩니다.'; st.classList.add('text-slate-500'); showAirlabsKeyWarn(''); return; }
+  const cleaned = String(raw || '').length && cleanAirlabsKey(raw) !== String(raw || '') ? ' · 공백·줄바꿈·따옴표 지움' : '';
+  st.textContent = `✓ 저장됨 (끝 4자 ${maskKey(k)}, ${k.length}자${cleaned})`;
+  st.classList.add('text-emerald-700');
+  showAirlabsKeyWarn(airlabsKeyWarning(raw, k));
+}
+
+/** 키 형식 경고 (저장은 그대로 하되 눈에 띄게): 너무 짧음 / 이상한 글자 / 공백·줄바꿈이 섞여 있었음 */
+export function airlabsKeyWarning(raw, k) {
+  const w = [];
+  if (k && k.length < 12) w.push(`키가 너무 짧습니다(${k.length}자) — 복사가 덜 됐는지 확인하세요. AirLabs 키는 보통 30자 이상입니다.`);
+  if (k && /[^A-Za-z0-9_-]/.test(k)) w.push('키에 영문·숫자·- 가 아닌 글자가 있습니다 — 다른 글(설명 문장 등)까지 함께 복사된 것 같습니다.');
+  if (/\S\s+\S/.test(String(raw || '').trim())) w.push('붙여 넣은 글 가운데에 공백·줄바꿈이 있어 지우고 저장했습니다. 키가 맞는지 [연결 확인]으로 확인하세요.');
+  return w.join(' ');
+}
+
+function showAirlabsKeyWarn(text) {
+  const el = document.getElementById('airlabsKeyWarn');
+  if (!el) return;
+  el.textContent = text ? `⚠️ ${text}` : '';
+  el.classList.toggle('hidden', !text);
+}
+
+/** [연결 확인] — AirLabs /ping 결과를 화면에 그대로 */
+export async function checkAirlabsConnection() {
+  const inp = document.getElementById('airlabsApiKey');
+  if (inp) onAirlabsKeyChanged();
+  const out = document.getElementById('airlabsPingResult');
+  const btn = document.getElementById('btnAirlabsPing');
+  if (btn) { btn.disabled = true; btn.textContent = '확인 중...'; }
+  if (out) { out.textContent = 'AirLabs 에 묻는 중...'; out.className = 'help'; }
+  let r;
+  try { r = await pingAirlabs(); } catch (e) { r = { ok: false, text: `확인 중 오류: ${e && e.message ? e.message : e}` }; }
+  if (out) {
+    out.textContent = r.text;
+    out.className = `text-[13px] font-semibold ${r.ok ? 'text-emerald-700' : 'text-rose-700'}`;
+    out.dataset.ok = r.ok ? '1' : '0';
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '연결 확인'; }
+  const u = document.getElementById('airlabsUsageText');
+  if (u) u.textContent = airlabsUsageText();
+  return r;
 }
 
 /** 모델 이름 설정 (비우면 기본 gemini-3.6-flash) */
@@ -94,15 +151,22 @@ export function openUploadModalForCurrentMonth() {
   if (modelInput) { modelInput.value = getGeminiModel(); modelInput.placeholder = GEMINI_MODEL; }
   const alInput = document.getElementById('airlabsApiKey');
   if (alInput) alInput.value = getAirlabsKey();
+  showAirlabsKeyStatus(alInput ? alInput.value : '');
+  const ping = document.getElementById('airlabsPingResult');
+  if (ping) { ping.textContent = ''; ping.className = 'help'; delete ping.dataset.ok; }
   const alUsage = document.getElementById('airlabsUsageText');
   if (alUsage) alUsage.textContent = airlabsUsageText();
-  fillRecoPrefsUI();
 
   document.getElementById('uploadModal').classList.remove('hidden');
 }
 
 export function closeUploadModal() {
+  // 창을 닫는 순간에도 키를 한 번 더 저장 (입력칸에서 포커스를 옮기지 않고 바로 닫아도 저장되게)
+  if (document.getElementById('airlabsApiKey')) onAirlabsKeyChanged();
+  if (document.getElementById('geminiApiKey')) onApiKeyChanged();
   document.getElementById('uploadModal').classList.add('hidden');
+  // 키가 바뀌었을 수 있으니 상세 카드(비행 상자의 버튼·안내)를 다시 그림
+  try { if (state.selectedDateKey) updateDetailCard(); } catch (e) { console.warn('상세 카드 갱신 실패', e); }
 }
 
 export function setUploadTargetMonth(year, month) {

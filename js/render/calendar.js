@@ -1,18 +1,18 @@
-// 달력·추천·상세카드 렌더링
+// 달력·상세카드 렌더링
 // ⚠️ innerHTML 에 데이터(근무명·도시·시간·기념일명 등)를 넣을 때는 반드시 escapeHtml() 을 거칠 것.
-//    3단계부터 달력 칸·추천·상세카드는 textContent 로만 만든다.
-// 3단계 디자인('가독성 우선'): 색·글자 크기는 css/app.css 의 :root 변수. 칸 구조는
-//   .cal-cell > .cal-top(날짜 숫자 span · 아이콘) > .cal-sub(공휴일·기념일) > .cal-duties(.duty 규호 / .duty 예진 / 시간)
-//   data-kind(근무 계열)·data-reco(데이트 가능 종류) 를 달아 두어 비교 도구가 클래스명이 아니라 내용으로 비교한다.
+//    3단계부터 달력 칸·상세카드는 textContent 로만 만든다.
+// 디자인: 색·글자 크기는 css/app.css 의 :root 변수. 칸 구조는
+//   .cal-cell > .cal-top(날짜 숫자 span · 아이콘) > .cal-sub(공휴일·기념일) > .cal-duties(.duty 규호(윗줄) / .duty 예진(아랫줄) / 시간)
+//   v2.3.0: 사람 구분은 운영본처럼 위치(규호 윗줄·예진 아랫줄), 근무 형태 색은 운영본 그대로 (app.css).
+//   data-kind(근무 계열)를 달아 두어 비교 도구가 클래스명이 아니라 내용으로 비교한다.
+// 캡처: captureCalendar() — 브라우저가 그린 그대로 찍는 modern-screenshot(SVG foreignObject, vendor/ 에 고정 버전 내장)
 import { BASE_LOVE_DATE } from '../config.js';
 import { state } from '../state.js';
-import { getKSTDate, getDiffDays, makeDateKey, parseDateKey, weekdayOfKey } from '../dates.js';
+import { getKSTDate, getDiffDays, makeDateKey, parseDateKey } from '../dates.js';
 import { HOLIDAYS } from '../holidays.js';
-import { convertLocalToKST } from '../timezone.js';
+import { stayKstInfo, kstDiffText, KST_UNKNOWN } from '../timezone.js';
 import { calculateBarPosition, kyuhoKind, gfKind } from '../schedule-model.js';
 import { getAnniversaryInfo } from '../anniversary.js';
-import { computeAvailableDays, recoIcon } from '../recommend.js';
-import { getRecoPrefs } from '../ui/reco-prefs.js';
 import { renderFlightBox } from '../ui/flight-card.js';
 
 // 4글자 이상(예: 비슈케크·타이베이)은 좁은 칸에서 '…'으로 잘리지 않게 자간·여백을 줄인다 (app.css .duty--long)
@@ -46,12 +46,6 @@ export function gfCellLabel(g) {
   return g.type;
 }
 
-/** "(KR+1일 01:00)" → { time:'01:00', shift:1 } */
-function parseKst(s) {
-  const m = /KR([+-]\d+)?일?\s*(\d{2}:\d{2})/.exec(String(s || ''));
-  return m ? { time: m[2], shift: m[1] ? Number(m[1]) : 0 } : null;
-}
-
 export function updateDDayHeader() {
   const dDayEl = document.getElementById('dDayBadge');
   if (!dDayEl) return;
@@ -64,57 +58,6 @@ export function updateDDayHeader() {
   dDayEl.title = `${BASE_LOVE_DATE.getFullYear()}.${BASE_LOVE_DATE.getMonth() + 1}.${BASE_LOVE_DATE.getDate()}~`;
   const modalDDayEl = document.getElementById('modalDDayText');
   if (modalDDayEl) modalDDayEl.innerText = `오늘 기준 함께한 지 ${diff}일째입니다 💕 (${BASE_LOVE_DATE.getFullYear()}.${BASE_LOVE_DATE.getMonth() + 1}.${BASE_LOVE_DATE.getDate()}~)`;
-}
-
-/** 추천 카드 두 줄째 글 */
-function recoLines(item) {
-  const m = state.currentMonth;
-  const dow = ['일', '월', '화', '수', '목', '금', '토'][weekdayOfKey(makeDateKey(state.currentYear, m, item.day))];
-  if (item.type === '여행') {
-    const range = String(item.text).replace(/\s*\(?여행 가능\)?\s*$/, '');
-    return { date: range, time: '여행 가능 (연속 휴무)' };
-  }
-  const paren = /\((.*)\)\s*$/.exec(item.text);
-  const time = item.type === '종일' ? '종일 가능' : (paren ? paren[1].replace(/,\s*/g, ' · ') : '');
-  return { date: `${m}/${item.day} (${dow})`, time };
-}
-
-export function renderAvailableDates(precomputed) {
-  const { currentYear, currentMonth } = state;
-  const monthTitle = document.getElementById('availableDateMonthTitle');
-  if (monthTitle) monthTitle.innerText = `${currentMonth}월`;
-  const container = document.getElementById('availableDatesList');
-  if (!container) return;
-  container.innerHTML = '';
-
-  const availableDays = precomputed || computeAvailableDays(state.scheduleDB, currentYear, currentMonth, getRecoPrefs());
-  const count = document.getElementById('availableDatesCount');
-  if (count) count.textContent = availableDays.length ? `${availableDays.length}일` : '';
-
-  if (availableDays.length === 0) {
-    container.appendChild(el('p', 'col-span-3 text-[13px] text-slate-500 py-2', '근무표를 등록하면 데이트 가능한 날이 자동 계산됩니다.'));
-    return;
-  }
-
-  availableDays.forEach(item => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    const kind = item.type === '종일' ? 'is-allday' : item.type === '여행' ? 'is-trip' : '';
-    btn.className = `reco-card ${kind}`;
-    const lines = recoLines(item);
-    btn.append(el('span', 'reco-date', `${recoIcon(item.type)} ${lines.date}`), el('span', 'reco-time', lines.time));
-    btn.dataset.chip = `${recoIcon(item.type)} ${item.text}`; // 2단계와 같은 글 (테스트·비교용)
-    btn.dataset.recoType = item.type;
-    btn.dataset.recoDay = String(item.day);
-    btn.setAttribute('aria-label', `${lines.date} ${lines.time}`);
-    if (item.reasons && item.reasons.length) btn.title = item.reasons.join(' / ');
-    btn.onclick = () => {
-      selectDate(makeDateKey(currentYear, currentMonth, item.day));
-      const card = document.getElementById('selectedDateTitle');
-      if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    };
-    container.appendChild(btn);
-  });
 }
 
 function setBar(bar, start, end, label, color) {
@@ -143,17 +86,17 @@ export function updateDetailCard() {
     tagsBox.innerHTML = '';
     const holiday = HOLIDAYS[selectedDateKey];
     if (holiday) {
-      const t = el('span', 'text-[12px] bg-red-50 text-red-700 border border-red-200 font-bold px-2 py-0.5 rounded-md');
+      const t = el('span', 'text-[12px] bg-red-50 text-red-700 border border-red-200 font-semibold px-2 py-0.5 rounded-md');
       t.append(el('i', 'fa-solid fa-flag mr-1'), document.createTextNode(holiday));
       tagsBox.appendChild(t);
     }
     const aniv = getAnniversaryInfo(selectedDateKey, state.customAnniversaries);
     if (aniv) {
-      const t = el('span', 'text-[12px] bg-amber-50 text-amber-800 border border-amber-200 font-bold px-2 py-0.5 rounded-md');
+      const t = el('span', 'text-[12px] bg-amber-50 text-amber-800 border border-amber-200 font-semibold px-2 py-0.5 rounded-md');
       t.append(el('i', 'fa-solid fa-star mr-1'), document.createTextNode(aniv.name));
       tagsBox.appendChild(t);
     }
-    if (selectedDateKey === todayKey()) tagsBox.appendChild(el('span', 'text-[12px] bg-indigo-50 text-indigo-800 border border-indigo-200 font-bold px-2 py-0.5 rounded-md', '오늘'));
+    if (selectedDateKey === todayKey()) tagsBox.appendChild(el('span', 'text-[12px] bg-indigo-50 text-indigo-800 border border-indigo-200 font-semibold px-2 py-0.5 rounded-md', '오늘'));
   }
 
   const wrapKyuho = document.getElementById('timelineWrapKyuho');
@@ -188,20 +131,18 @@ export function updateDetailCard() {
     if (g && g.start && g.end) {
       setBar(gfBar, g.start, g.end, dest || g.type, g.isQuickTurn ? '#0e7490' : 'var(--kv-yejin)');
       let desc = `${dest ? '✈️ ' + dest + ' ' : ''}${!dest ? g.type + ' ' : ''}(${g.start} ~ ${g.end})`;
-      if (!g.isQuickTurn && g.type === '체류') {
-        if (g.isInbound) {
-          const kstStart = convertLocalToKST(dest, g.start, selectedDateKey);
-          if (kstStart) desc += ` [출발 KST: ${kstStart}]`;
-        } else {
-          const kstEnd = convertLocalToKST(dest, g.end, selectedDateKey);
-          if (kstEnd) desc += ` [도착 KST: ${kstEnd}]`;
-        }
-      }
+      const k = stayKstInfo(g, selectedDateKey); // 달력 칸과 같은 함수
+      if (k && k.status !== 'same') desc += ` [${k.kind === 'departure' ? '출발' : '도착'} KST: ${k.text}]`;
       if (g.flight) desc += ` [${g.flight}]`;
       gfText.innerText = desc;
     } else {
       clearBar(gfBar);
       gfText.innerText = g ? (g.isArrivalOnly ? `${dest} (도착일/체류)` : (g.isPureStay ? `${dest} (L/O 체류)` : (dest ? `${dest} (${g.type})` : `${g.type}`))) : '근무 없음';
+    }
+    // 체류지 시차 안내 (출발·체류 중간·귀국일 모두) — 같은 장소 표(places.js)
+    if (g && dest && (g.type === '체류' || g.isPureStay || g.isArrivalOnly) && !g.isQuickTurn) {
+      const diff = kstDiffText(dest, selectedDateKey);
+      if (diff !== '한국과 같은 시각') gfText.appendChild(el('span', 'kst-diff', diff ? `🕒 현지는 ${diff}` : `🕒 ${dest}: 시간대 미등록 ${KST_UNKNOWN}`));
     }
     if (g && g.manual) gfText.appendChild(el('span', 'manual-tag', '✋ 직접 입력'));
     if (g && g.timesFrom === 'flightTimes') gfText.appendChild(el('span', 'manual-tag', '🕒 편명 시간표'));
@@ -276,18 +217,14 @@ export function renderCalendar() {
   if (upBtnTxt) upBtnTxt.innerText = `${currentMonth}월 등록`;
 
   const grid = document.getElementById('calendarGrid');
+  // 예진만 보기: 칸에 시간·한국시각·(+1일)까지 4줄이 들어가므로 칸을 조금 높인다 (기념일 줄이 있어도 잘리지 않게)
+  if (grid) grid.classList.toggle('cal-grid--tall', Boolean(showYejin && !showKyuho));
   if (!grid) return;
   grid.innerHTML = '';
 
   const firstDay = new Date(currentYear, currentMonth - 1, 1).getDay();
   const totalDays = new Date(currentYear, currentMonth, 0).getDate();
   const tKey = todayKey();
-  const reco = computeAvailableDays(state.scheduleDB, currentYear, currentMonth, getRecoPrefs());
-  const recoByDay = new Map();
-  for (const r of reco) {
-    if (r.type === '여행' && Array.isArray(r.days)) { for (const d of r.days) recoByDay.set(d, r.type); }
-    else recoByDay.set(r.day, r.type);
-  }
 
   for (let i = 0; i < firstDay; i++) grid.appendChild(el('div', 'calendar-cell cal-cell is-empty'));
 
@@ -296,12 +233,9 @@ export function renderCalendar() {
     const dayData = state.scheduleDB[dateKey] || { my: null, gf: null, date: null };
     const holidayName = HOLIDAYS[dateKey];
     const aniv = getAnniversaryInfo(dateKey, state.customAnniversaries);
-    const recoType = recoByDay.get(day) || '';
-    const allDay = recoType === '종일' || recoType === '여행';
 
-    const cell = el('div', `calendar-cell cal-cell${allDay ? ' is-dateday' : ''}${selectedDateKey === dateKey ? ' is-selected' : ''}`);
+    const cell = el('div', `calendar-cell cal-cell${selectedDateKey === dateKey ? ' is-selected' : ''}`);
     cell.dataset.date = dateKey;
-    if (recoType) cell.dataset.reco = recoType;
     cell.onclick = () => selectDate(dateKey);
 
     // 1줄: 날짜 숫자(첫 span) + 아이콘
@@ -312,7 +246,6 @@ export function renderCalendar() {
     if (dateKey === tKey) daySpan.title = '오늘';
     top.appendChild(daySpan);
     const icons = el('div', 'cal-icons');
-    if (recoType) { const r = el('b', '', recoType === '여행' ? '💖' : recoIcon(recoType)); r.title = `데이트 가능: ${recoType}`; r.style.fontWeight = '400'; icons.appendChild(r); }
     if (aniv) icons.appendChild(el('i', 'fa-solid fa-star text-amber-500'));
     if (dayData.date) icons.appendChild(el('i', 'fa-solid fa-heart text-rose-600'));
     if (dayData.myPromise) { const d = el('i', 'dot dot--k'); d.title = '규호 일정'; icons.appendChild(d); }
@@ -341,12 +274,16 @@ export function renderCalendar() {
           const t = timeLines(g.start, g.end);
           const isStay = g.type === '체류' && !g.isQuickTurn;
           if (isStay) {
-            const k = parseKst(convertLocalToKST(g.destination, g.isInbound ? g.start : g.end, dateKey));
-            if (k) {
+            const k = stayKstInfo(g, dateKey); // 상세 카드·미리보기와 같은 함수
+            if (k && k.status === 'ok') {
               const line = el('div', 'kst', `KR${k.time}`);
-              line.title = g.isInbound ? '출발 한국시각' : '도착 한국시각';
+              line.title = `${k.kind === 'departure' ? '출발' : '도착'} 한국시각 ${k.text}`;
               if (g.isInbound) t.insertBefore(line, t.children[1]); else t.appendChild(line);
               if (k.shift) t.appendChild(el('div', 'kst', `(${k.shift > 0 ? '+' : ''}${k.shift}일)`));
+            } else if (k && k.status === 'unknown') {
+              const line = el('div', 'kst kst--unknown', 'KR ?');
+              line.title = `'${g.destination || ''}' 시간대 미등록 — 한국시각을 계산하지 못함`;
+              if (g.isInbound) t.insertBefore(line, t.children[1]); else t.appendChild(line);
             }
           }
           duties.appendChild(t);
@@ -357,7 +294,6 @@ export function renderCalendar() {
     grid.appendChild(cell);
   }
 
-  renderAvailableDates(reco);
   updateDetailCard();
 }
 
@@ -396,25 +332,190 @@ export function toggleScheduleFilter(target) {
   renderCalendar();
 }
 
+// ---------------- 달력 캡처 ----------------
+// 원인(v2.2.0 까지): html2canvas 1.4.1 은 화면을 자기 방식으로 다시 그려서
+//   ① inset box-shadow(사람 막대·선택 칸 테두리)를 두꺼운 테두리로 그리고 ② 고정 높이+overflow:hidden 칸의 글자 기준선을
+//   아래로 밀어 근무 글자가 잘렸다(웹폰트·음수 자간에서 더 심함).
+// 해결(v2.3.0): modern-screenshot(SVG foreignObject) — 브라우저가 화면과 똑같이 그린 결과를 이미지로 받는다.
+//   웹폰트(Pretendard)가 다 받아진 뒤(document.fonts) 찍고, 폰트 파일은 이미지 안에 넣어 같은 글꼴로 나온다.
+//   실패하면(아주 옛 브라우저 등) html2canvas 를 그때 불러 캡처 전용 보정(.cap-h2c)으로 찍는다.
+const HTML2CANVAS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+let msPromise = null;
+function loadModernScreenshot() {
+  if (!msPromise) msPromise = import('../../vendor/modern-screenshot.js').catch(e => { msPromise = null; throw e; });
+  return msPromise;
+}
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (window.html2canvas) return resolve();
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = () => resolve(); s.onerror = () => reject(new Error('html2canvas 를 불러오지 못했습니다 (인터넷 연결 확인)'));
+    document.head.appendChild(s);
+  });
+}
+
+/** 글꼴(Pretendard 500·600·700)이 실제로 받아질 때까지 기다림 — 받기 전에 찍으면 대체 글꼴로 찍힘 */
+async function waitFonts() {
+  const f = document.fonts;
+  if (!f) return;
+  try {
+    await Promise.race([
+      Promise.all(['500', '600', '700'].map(w => f.load(`${w} 12px "Pretendard Variable"`, '가A1'))).then(() => f.ready),
+      new Promise(r => setTimeout(r, 4000))
+    ]);
+  } catch { /* 글꼴을 못 받아도 캡처는 진행 */ }
+}
+
+/**
+ * SVG(foreignObject) → PNG.
+ * 크롬은 SVG 이미지 안의 웹폰트(데이터 URL)를 비동기로 적용해서, 바로 그리면 가끔(폰이 바쁠 때) 대체 글꼴·빈 아이콘으로 찍힌다
+ * (2026-11 확인: 글자 폭이 달라 '2026. 11' 이 두 줄로 넘어감, 아이콘이 다른 모양).
+ * 그래서 이미지 아래에 '확인용 글자(가A1)·아이콘' 줄을 덧붙여 그려 보고, 그 줄의 글자 폭이 화면(이미 글꼴이 적용된 문서)에서
+ * 같은 글꼴로 그린 폭과 같아질 때까지 다시 그린다 (최대 약 6초). 확인 줄은 결과 이미지에서 잘라 낸다.
+ */
+const PROBE_H = 60;
+const PROBE_TEXT = '가A1';
+const PROBE_ICON = '\uf053'; // fa-chevron-left (Font Awesome 6 Free Solid)
+
+function inkWidth(ctx, x0, y0, w, h) {
+  const d = ctx.getImageData(x0, y0, w, h).data;
+  let min = w, max = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (d[i] + d[i + 1] + d[i + 2] < 384) { if (x < min) min = x; if (x > max) max = x; }
+    }
+  }
+  return max < 0 ? 0 : max - min + 1;
+}
+
+/** 문서(글꼴 적용됨)에서 그린 확인 줄의 글자·아이콘 폭 = 기대값 */
+function expectedProbe(scale) {
+  const c = document.createElement('canvas');
+  c.width = Math.round(260 * scale); c.height = Math.round(PROBE_H * scale);
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  x.fillStyle = '#000'; x.textBaseline = 'middle';
+  x.font = `600 ${40 * scale}px "Pretendard Variable"`;
+  x.fillText(PROBE_TEXT, 0, c.height / 2);
+  x.font = `900 ${40 * scale}px "Font Awesome 6 Free"`;
+  x.fillText(PROBE_ICON, 200 * scale, c.height / 2);
+  return { text: inkWidth(x, 0, 0, Math.round(190 * scale), c.height), icon: inkWidth(x, Math.round(200 * scale), 0, Math.round(60 * scale), c.height) };
+}
+
+function addProbe(svg, w, h) {
+  const XHTML = 'http://www.w3.org/1999/xhtml';
+  svg.setAttribute('height', String(h + PROBE_H));
+  svg.setAttribute('viewBox', `0 0 ${w} ${h + PROBE_H}`);
+  const fo = svg.querySelector('foreignObject');
+  const probe = document.createElementNS(XHTML, 'div');
+  probe.setAttribute('style', `position:absolute;left:0;top:${h}px;width:${w}px;height:${PROBE_H}px;background:#fff;color:#000;white-space:nowrap;margin:0;padding:0;letter-spacing:0`);
+  const t = document.createElementNS(XHTML, 'span');
+  t.setAttribute('style', `position:absolute;left:0;top:0;height:${PROBE_H}px;line-height:${PROBE_H}px;font:600 40px "Pretendard Variable";letter-spacing:0`);
+  t.textContent = PROBE_TEXT;
+  const i = document.createElementNS(XHTML, 'span');
+  i.setAttribute('style', `position:absolute;left:200px;top:0;height:${PROBE_H}px;line-height:${PROBE_H}px;font:900 40px "Font Awesome 6 Free";letter-spacing:0`);
+  i.textContent = PROBE_ICON;
+  probe.append(t, i);
+  // foreignObject 안 첫 요소(캡처 대상) 기준 절대 위치가 되도록 감싸지 않고 foreignObject 에 바로 붙임
+  fo.setAttribute('style', `${fo.getAttribute('style') || ''};position:relative`);
+  fo.appendChild(probe);
+}
+
+// 캡처 이미지에 넣을 글꼴 (한 번 받아 메모리에 보관): Pretendard(앱 내장) + Font Awesome Solid(아이콘, cdnjs — CORS 허용).
+// modern-screenshot 의 자동 수집은 가끔 아이콘 글꼴을 빠뜨려(외부 CDN 받기 실패·경합) 아이콘이 네모로 찍혀서 직접 넣는다.
+let fontCssCache = null;
+async function toDataUrl(url) {
+  const r = await fetch(url, { mode: 'cors', cache: 'force-cache' });
+  if (!r.ok) throw new Error(`HTTP ${r.status} ${url}`);
+  const b = await r.blob();
+  return await new Promise((ok, bad) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => bad(fr.error); fr.readAsDataURL(b); });
+}
+async function captureFontCss() {
+  if (fontCssCache) return fontCssCache;
+  const parts = [];
+  let icon = false, pret = false;
+  try {
+    const u = await toDataUrl(new URL('../../fonts/PretendardVariable.woff2', import.meta.url).href);
+    parts.push(`@font-face { font-family: "Pretendard Variable"; font-weight: 45 920; font-style: normal; font-display: block; src: url("${u}") format("woff2"); }`);
+    pret = true;
+  } catch (e) { console.warn('달력 캡처: Pretendard 글꼴을 읽지 못함', e); }
+  const fa = document.querySelector('link[href*="font-awesome"]');
+  if (fa) {
+    try {
+      const u = await toDataUrl(new URL('../webfonts/fa-solid-900.woff2', fa.href).href);
+      parts.push(`@font-face { font-family: "Font Awesome 6 Free"; font-weight: 900; font-style: normal; font-display: block; src: url("${u}") format("woff2"); }`);
+      icon = true;
+    } catch (e) { console.warn('달력 캡처: 아이콘 글꼴을 받지 못함(인터넷 확인) — 아이콘 없이 찍힐 수 있음', e); }
+  }
+  const out = { css: parts.join('\n'), icon };
+  if (pret && (icon || !fa)) fontCssCache = out; // 다 받았을 때만 보관 (실패면 다음에 다시 시도)
+  return out;
+}
+
+async function rasterizeSvg(svg, scale, { icon = true } = {}) {
+  const w = Number(svg.getAttribute('width')), h = Number(svg.getAttribute('height'));
+  addProbe(svg, w, h);
+  const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+  const want = expectedProbe(scale);
+  const W = Math.round(w * scale), H = Math.round(h * scale), PH = Math.round(PROBE_H * scale);
+  const full = document.createElement('canvas');
+  full.width = W; full.height = H + PH;
+  const ctx = full.getContext('2d', { willReadFrequently: true });
+  const img = new Image();
+  img.src = url;
+  if (img.decode) await img.decode(); else await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; });
+  const t0 = Date.now();
+  let ok = false, got = null;
+  for (let i = 0; i < 40; i++) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, full.width, full.height);
+    ctx.drawImage(img, 0, 0, full.width, full.height);
+    got = { text: inkWidth(ctx, 0, H, Math.round(190 * scale), PH), icon: inkWidth(ctx, Math.round(200 * scale), H, Math.round(60 * scale), PH) };
+    const tol = 2 * scale + 1;
+    if (got.text > 0 && Math.abs(got.text - want.text) <= tol && (!icon || Math.abs(got.icon - want.icon) <= tol)) { ok = true; break; }
+    if (Date.now() - t0 > 6000) break;
+    await new Promise(r => setTimeout(r, 150));
+  }
+  if (!ok) console.warn('달력 캡처: 글꼴 적용 확인 실패 — 대체 글꼴로 찍혔을 수 있음', JSON.stringify({ want, got }));
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  out.getContext('2d').drawImage(full, 0, 0, W, H, 0, 0, W, H);
+  return out.toDataURL('image/png');
+}
+
+/** 캡처 대상 → PNG data URL (테스트에서도 사용) */
+export async function renderCalendarImage(target) {
+  await waitFonts();
+  const scale = Math.min(3, Math.max(2, Math.round(window.devicePixelRatio || 2)));
+  try {
+    const ms = await loadModernScreenshot();
+    const fonts = await captureFontCss();
+    const svg = await ms.domToForeignObjectSvg(target, { backgroundColor: '#ffffff', timeout: 20000, font: fonts.css ? { cssText: fonts.css } : { preferredFormat: 'woff2' } });
+    return await rasterizeSvg(svg, scale, { icon: fonts.icon });
+  } catch (err) {
+    console.warn('달력 캡처: modern-screenshot 실패 → html2canvas 로 대체', err);
+    await loadScript(HTML2CANVAS_URL);
+    const canvas = await window.html2canvas(target, {
+      scale, useCORS: true, backgroundColor: '#ffffff', logging: false, scrollY: 0, scrollX: 0,
+      onclone: doc => doc.documentElement.classList.add('cap-h2c')
+    });
+    return canvas.toDataURL('image/png');
+  }
+}
+
 export async function captureCalendar() {
   const target = document.getElementById('calendarCaptureArea');
   const btn = document.getElementById('btnCaptureCalendar');
   if (!target) return;
+  if (btn && btn.dataset.busy === '1') return;
 
   const originalBtnHtml = btn ? btn.innerHTML : '';
-  if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin text-indigo-500"></i><span>캡처</span>';
+  if (btn) { btn.dataset.busy = '1'; btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin text-indigo-500"></i><span>캡처</span>'; }
 
   try {
-    const canvas = await window.html2canvas(target, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: "#ffffff",
-      logging: false,
-      scrollY: 0,
-      scrollX: 0
-    });
-
-    const imageURL = canvas.toDataURL("image/png");
+    const imageURL = await renderCalendarImage(target);
     const downloadLink = document.createElement('a');
     downloadLink.download = `규호♥예진_근무표_${state.currentYear}년_${String(state.currentMonth).padStart(2, '0')}월.png`;
     downloadLink.href = imageURL;
@@ -423,8 +524,8 @@ export async function captureCalendar() {
     document.body.removeChild(downloadLink);
   } catch (err) {
     console.error("캘린더 캡처 오류:", err);
-    alert("캘린더 캡처 중 문제가 발생했습니다: " + err.message);
+    alert("캘린더 캡처 중 문제가 발생했습니다: " + (err && err.message ? err.message : err));
   } finally {
-    if (btn) btn.innerHTML = originalBtnHtml;
+    if (btn) { btn.innerHTML = originalBtnHtml; delete btn.dataset.busy; }
   }
 }

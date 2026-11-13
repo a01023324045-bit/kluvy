@@ -14,7 +14,7 @@ import { dbFetch, dbGetJson, getDbBaseUrl } from './db-rest.js';
 import { SV_TIMESTAMP } from './sync-core.js';
 import { learnableFromGf, normalizeFlight, fillGfFromTimetable } from './flight.js';
 import {
-  airlabsUrl, chooseEndpoint, parseAirlabsFlight, parseAirlabsRoutes, airlabsErrorMessage,
+  airlabsUrl, chooseEndpoint, parseAirlabsFlight, parseAirlabsRoutes, airlabsErrorDetail, cleanAirlabsKey,
   AIRLABS_LIVE_TTL_MIN, AIRLABS_ROUTE_TTL_DAYS, AIRLABS_FREE_MONTHLY
 } from './airlabs.js';
 import { getKSTDate, makeDateKey } from './dates.js';
@@ -107,8 +107,18 @@ export function fillFromFlightTable(gf) {
 }
 
 // ---------------- AirLabs (선택) ----------------
-export function getAirlabsKey() { return (localStorage.getItem(AIRLABS_KEY_STORAGE) || '').trim(); }
-export function setAirlabsKey(k) { safeSetStorage(AIRLABS_KEY_STORAGE, String(k || '').trim()); }
+// 키는 이 폰 localStorage 'airlabs_api_key' 에 문자열 그대로 (v2.2.0 과 같은 형식 — 섞여 써도 안전)
+export function getAirlabsKey() {
+  let v = '';
+  try { v = localStorage.getItem(AIRLABS_KEY_STORAGE) || ''; } catch (e) { v = ''; }
+  return cleanAirlabsKey(v);
+}
+/** 정리(공백·줄바꿈·따옴표 제거)해서 저장하고 저장된 값을 돌려줌. 저장 실패면 null */
+export function setAirlabsKey(k) {
+  const clean = cleanAirlabsKey(k);
+  safeSetStorage(AIRLABS_KEY_STORAGE, clean);
+  return getAirlabsKey() === clean ? clean : null;
+}
 
 /** 이번 달 이 폰에서 보낸 AirLabs 요청 수 */
 export function getAirlabsUsage() {
@@ -128,13 +138,40 @@ export function airlabsUsageText() {
   return `이 폰 이번 달 ${u.count}회 사용 (무료 한도 월 ${AIRLABS_FREE_MONTHLY.toLocaleString()}회 — 두 폰 합산)`;
 }
 
+/** AirLabs 호출. 응답 JSON 에 _http(상태 코드)를 붙여 돌려줌. 네트워크 오류는 throw */
 async function callAirlabs(endpoint, params, key) {
   countUsage();
   const res = await fetch(airlabsUrl(getAirlabsBase(), endpoint, params, key));
   let json = null;
-  try { json = await res.json(); } catch (e) { json = null; }
-  if (!json) return { error: { code: res.ok ? 'internal_error' : `http_${res.status}`, message: `HTTP ${res.status}` } };
+  let text = '';
+  try { text = await res.text(); json = JSON.parse(text); } catch (e) { json = null; }
+  if (!json || typeof json !== 'object') {
+    return { _http: res.status, error: { code: res.ok ? 'internal_error' : `http_${res.status}`, message: `HTTP ${res.status}${text ? ' ' + text.slice(0, 120) : ''}` } };
+  }
+  json._http = res.status;
   return json;
+}
+
+function netError(e) {
+  return `AirLabs 에 연결하지 못했습니다 (네트워크·차단: ${e && e.message ? e.message : e}). 인터넷 연결을 확인해 주세요.`;
+}
+
+/**
+ * [N월 등록] → 「✈️ AirLabs」 → [연결 확인]: /api/v9/ping 으로 키 확인. 결과는 화면에 그대로 보여 줄 글.
+ * @returns {Promise<{ok:boolean, text:string, http?:number, code?:string, raw?:string}>}
+ */
+export async function pingAirlabs(rawKey) {
+  const key = cleanAirlabsKey(rawKey !== undefined ? rawKey : getAirlabsKey());
+  if (!key) return { ok: false, text: 'AirLabs API 키가 비어 있습니다. 키를 붙여 넣은 뒤 다시 눌러 주세요.' };
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, text: '인터넷 연결이 없습니다.' };
+  let json;
+  try { json = await callAirlabs('ping', {}, key); } catch (e) { return { ok: false, text: netError(e) }; }
+  const http = json._http;
+  if (json.error) return { ok: false, http, code: String(json.error.code || ''), raw: String(json.error.message || ''), text: `실패 · ${airlabsErrorDetail(json.error, http)}` };
+  const resp = json.response !== undefined ? json.response : json;
+  let short = typeof resp === 'string' ? resp : JSON.stringify(resp);
+  if (short.length > 80) short = short.slice(0, 80) + '…';
+  return { ok: true, http, text: `정상 · 응답 ${short} (HTTP ${http})` };
 }
 
 /**
@@ -143,7 +180,7 @@ async function callAirlabs(endpoint, params, key) {
  */
 export async function lookupFlightOnAirlabs(flightStr, dateKey, { force = false, now = Date.now() } = {}) {
   const key = getAirlabsKey();
-  if (!key) return { ok: false, message: 'AirLabs API 키가 없습니다. [N월 등록] → Gemini [설정] 아래 AirLabs 칸에 넣어 주세요.' };
+  if (!key) return { ok: false, message: 'AirLabs API 키가 없습니다. [N월 등록] → 「✈️ AirLabs (비행 시각 조회, 선택)」 칸에 넣어 주세요.' };
   const f = normalizeFlight(flightStr);
   if (!f) return { ok: false, message: '편명을 알아볼 수 없습니다.' };
   if (!navigator.onLine) return { ok: false, message: '인터넷 연결이 없습니다.' };
@@ -159,9 +196,9 @@ export async function lookupFlightOnAirlabs(flightStr, dateKey, { force = false,
       return { ok: true, cached: true, kind, message: `${Math.round((now - c.fetchedAt) / 60000)}분 전에 받은 정보입니다 (${AIRLABS_LIVE_TTL_MIN}분 안에는 다시 묻지 않음).` };
     }
     let json;
-    try { json = await callAirlabs('flight', { flight_iata: f.iata }, key); } catch (e) { return { ok: false, message: 'AirLabs 에 연결하지 못했습니다(네트워크).' }; }
+    try { json = await callAirlabs('flight', { flight_iata: f.iata }, key); } catch (e) { return { ok: false, message: netError(e) }; }
     const p = parseAirlabsFlight(json, dateKey);
-    if (p.error && p.error.code !== 'not_found') return { ok: false, message: airlabsErrorMessage(p.error) };
+    if (p.error && p.error.code !== 'not_found') return { ok: false, message: airlabsErrorDetail(p.error, json._http) };
     if (!p.error && p.match) {
       const day = { std: p.std, sta: p.sta, staDate: p.staDate, etd: p.etd, eta: p.eta, atd: p.atd, ata: p.ata, status: p.status, depDelay: p.depDelay, arrDelay: p.arrDelay, dep: p.dep, arr: p.arr, fetchedAt: now };
       t[f.iata] = { ...cur, days: { ...(cur.days || {}), [dateKey]: day } };
@@ -180,9 +217,9 @@ export async function lookupFlightOnAirlabs(flightStr, dateKey, { force = false,
     return { ok: true, cached: true, kind, message: `정기 노선 정보는 ${AIRLABS_ROUTE_TTL_DAYS}일 안에 다시 묻지 않습니다 (캐시 사용).` };
   }
   let json;
-  try { json = await callAirlabs('routes', { airline_iata: f.airline, flight_iata: f.iata }, key); } catch (e) { return { ok: false, message: 'AirLabs 에 연결하지 못했습니다(네트워크).' }; }
+  try { json = await callAirlabs('routes', { airline_iata: f.airline, flight_iata: f.iata }, key); } catch (e) { return { ok: false, message: netError(e) }; }
   const p = parseAirlabsRoutes(json, f.iata, dateKey);
-  if (p.error) return { ok: false, message: airlabsErrorMessage(p.error) };
+  if (p.error) return { ok: false, message: airlabsErrorDetail(p.error, json._http) };
   const route = { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, days: p.days, fetchedAt: now };
   t[f.iata] = { ...cur, airlabs: route };
   if (!cur.std && !cur.sta) Object.assign(t[f.iata], { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, source: 'airlabs' });

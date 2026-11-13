@@ -4,6 +4,7 @@
 // 근무표·사진에서 오는 편명 표기는 제각각이라 하나로 맞춘다:
 //   '405 ICN-FCO' · 'TW405' · 'TW 405' · 'TWB405' · '티웨이 405' · '트리니티405' · '405'  → { iata:'TW405', icao:'TWB405', dep, arr }
 import { localWallToUtc, tzOffsetMinutes } from './timezone.js';
+import { PLACES } from './places.js';
 
 export const HOME_AIRLINE = Object.freeze({ iata: 'TW', icao: 'TWB', name: '트리니티항공', oldName: '티웨이항공' });
 
@@ -57,32 +58,25 @@ export function flightLinks(f) {
   ];
 }
 
-// 공항 → [도시, IANA 시간대, (선택) {from, tz} 날짜별 예외]. 목록에 없는 공항은 현지시각만 보여 준다.
-export const AIRPORTS = Object.freeze({
-  ICN: ['인천', 'Asia/Seoul'], GMP: ['김포', 'Asia/Seoul'], PUS: ['부산', 'Asia/Seoul'], CJU: ['제주', 'Asia/Seoul'],
-  TAE: ['대구', 'Asia/Seoul'], CJJ: ['청주', 'Asia/Seoul'], KWJ: ['광주', 'Asia/Seoul'], MWX: ['무안', 'Asia/Seoul'], YNY: ['양양', 'Asia/Seoul'],
-  NRT: ['도쿄 나리타', 'Asia/Tokyo'], HND: ['도쿄 하네다', 'Asia/Tokyo'], KIX: ['오사카', 'Asia/Tokyo'], FUK: ['후쿠오카', 'Asia/Tokyo'],
-  NGO: ['나고야', 'Asia/Tokyo'], OKA: ['오키나와', 'Asia/Tokyo'], CTS: ['삿포로', 'Asia/Tokyo'], KMJ: ['구마모토', 'Asia/Tokyo'],
-  OIT: ['오이타', 'Asia/Tokyo'], KOJ: ['가고시마', 'Asia/Tokyo'], SDJ: ['센다이', 'Asia/Tokyo'], HIJ: ['히로시마', 'Asia/Tokyo'],
-  UBJ: ['야마구치 우베', 'Asia/Tokyo'], TAK: ['다카마쓰', 'Asia/Tokyo'], KKJ: ['기타큐슈', 'Asia/Tokyo'], SHI: ['미야코', 'Asia/Tokyo'],
-  FCO: ['로마', 'Europe/Rome'], CDG: ['파리', 'Europe/Paris'], BCN: ['바르셀로나', 'Europe/Madrid'], FRA: ['프랑크푸르트', 'Europe/Berlin'],
-  ZAG: ['자그레브', 'Europe/Zagreb'],
-  YVR: ['밴쿠버', 'America/Vancouver', { from: '2026-11-01', tz: 'Etc/GMT+7' }], // BC주 서머타임 영구화 (timezone.js 와 같음)
-  FRU: ['비슈케크', 'Asia/Bishkek'], CGK: ['자카르타', 'Asia/Jakarta'], DPS: ['발리', 'Asia/Makassar'],
-  BKK: ['방콕', 'Asia/Bangkok'], CNX: ['치앙마이', 'Asia/Bangkok'],
-  DAD: ['다낭', 'Asia/Ho_Chi_Minh'], CXR: ['나트랑', 'Asia/Ho_Chi_Minh'], PQC: ['푸꾸옥', 'Asia/Ho_Chi_Minh'], HAN: ['하노이', 'Asia/Ho_Chi_Minh'], SGN: ['호찌민', 'Asia/Ho_Chi_Minh'],
-  SIN: ['싱가포르', 'Asia/Singapore'], HKG: ['홍콩', 'Asia/Hong_Kong'], MFM: ['마카오', 'Asia/Macau'],
-  TPE: ['타이베이', 'Asia/Taipei'], RMQ: ['타이중', 'Asia/Taipei'], KHH: ['가오슝', 'Asia/Taipei'],
-  UBN: ['울란바토르', 'Asia/Ulaanbaatar'], SHE: ['선양', 'Asia/Shanghai'], WUH: ['우한', 'Asia/Shanghai'], TAO: ['칭다오', 'Asia/Shanghai'],
-  PVG: ['상하이', 'Asia/Shanghai'], PEK: ['베이징', 'Asia/Shanghai'], YNJ: ['옌지', 'Asia/Shanghai'], SYX: ['싼야', 'Asia/Shanghai'],
-  CEB: ['세부', 'Asia/Manila'], MNL: ['마닐라', 'Asia/Manila'], KLO: ['칼리보', 'Asia/Manila'], BKI: ['코타키나발루', 'Asia/Kuching'],
-  SPN: ['사이판', 'Pacific/Saipan'], GUM: ['괌', 'Pacific/Guam'], SYD: ['시드니', 'Australia/Sydney']
-});
+// 공항 → [도시, IANA 시간대, (선택) {from, tz} 날짜별 예외] — places.js(취항지 표)에서 만든다 (timezone.js 와 같은 원천).
+// 목록에 없는 공항은 현지시각만 보여 주고 console.warn 으로 알린다.
+export const AIRPORTS = Object.freeze(Object.fromEntries(PLACES.flatMap(p => p.iata.map(code => {
+  const city = code === 'HND' ? '도쿄 하네다' : code === 'NRT' ? '도쿄 나리타' : p.name;
+  return [code, p.rule ? [city, p.tz, { ...p.rule }] : [city, p.tz]];
+}))));
 
+/** 한국 공항 (한국시각 = 현지시각이라 '→ 한국' 을 붙이지 않음) */
+export const KOREAN_AIRPORTS = Object.freeze(Object.keys(AIRPORTS).filter(c => AIRPORTS[c][1] === 'Asia/Seoul'));
+
+const warnedAirports = new Set();
 /** 그 날짜에 쓸 공항 시간대 (없으면 null) */
 export function airportZone(code, dateKey) {
-  const a = AIRPORTS[String(code || '').toUpperCase()];
-  if (!a) return null;
+  const c = String(code || '').toUpperCase();
+  const a = AIRPORTS[c];
+  if (!a) {
+    if (c && !warnedAirports.has(c)) { warnedAirports.add(c); console.warn(`[KLUVY] 시간대를 모르는 공항 '${c}' — 현지시각만 표시합니다. app/js/places.js 에 추가하세요.`); }
+    return null;
+  }
   const rule = a[2];
   if (rule && dateKey && dateKey >= rule.from) return rule.tz;
   return a[1];

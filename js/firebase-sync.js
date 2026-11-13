@@ -12,7 +12,7 @@
 //         서버 schedules 가 null 이면: v2 가 지운 기록(kluvyMeta/schedules)이 있을 때만 로컬도 비우고,
 //         없으면(서버가 처음부터 빔) v1 처럼 이 폰 데이터를 올린다. 빈 근무표를 통째로 올리는 일은 없다.
 import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, getConfiguredDbUrl } from './config.js';
-import { getFbAuthQuery, getIdTokenExpiry, invalidateIdToken } from './auth.js';
+import { getFbAuthQuery, getIdTokenExpiry, invalidateIdToken, fbIsLoggedIn } from './auth.js';
 import { safeGetStorage, safeSetStorage } from './storage.js';
 import { state } from './state.js';
 import { renderSyncBadge } from './ui/sync-badge.js';
@@ -82,6 +82,8 @@ function markSynced() {
 function refreshBadge() {
   const pending = core.queueCount(S.queue);
   if (!getConfiguredDbUrl()) return renderSyncBadge({ status: 'local' });
+  // 로그인 전에는 서버 응답(401)을 기다리지 않고 바로 '로그인 필요'를 보여 준다
+  if (!fbIsLoggedIn()) return renderSyncBadge({ status: 'login', pending });
   if (S.mode === 'login' || S.lastError === 'login') return renderSyncBadge({ status: 'login', pending });
   if (!navigator.onLine || S.mode === 'offline') return renderSyncBadge({ status: 'offline', pending });
   if (pending > 0 && (S.lastError === 'network' || !S.ready || (S.mode !== 'stream' && S.mode !== 'poll'))) {

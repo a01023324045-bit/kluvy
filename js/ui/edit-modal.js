@@ -17,9 +17,10 @@ let openedSnapshot = null;
 function readSection(name) {
   const v = id => (document.getElementById(id) || {}).value || '';
   if (name === 'my') return JSON.stringify([v('selectMyShiftType'), v('inputMyShiftCustom').trim(), v('inputMyTimeStart'), v('inputMyTimeEnd')]);
-  if (name === 'gf') return JSON.stringify([v('selectGfShiftType'), v('inputGfShiftCustom').trim(), v('inputGfDestination').trim(), v('inputGfTimeStart'), v('inputGfTimeEnd')]);
+  if (name === 'gf') return JSON.stringify([v('selectGfShiftType'), v('inputGfShiftCustom').trim(), v('inputGfDestination').trim(), v('inputGfTimeStart'), v('inputGfTimeEnd'), v('inputGfFlight').trim()]);
   return JSON.stringify([v('inputDateTimeStart'), v('inputDateTimeEnd'), v('inputDateMemo'), v('inputMyPromise').trim(), v('inputGfPromise').trim()]);
 }
+function setVal(id, v) { const e = document.getElementById(id); if (e) e.value = v; }
 function snapshotForm() { return { my: readSection('my'), gf: readSection('gf'), plan: readSection('plan') }; }
 
 /** 단일 날짜 저장에서 실제로 바꾼 항목 (테스트·E2E 용으로 노출) */
@@ -35,8 +36,8 @@ export function setEditMode(mode) {
   const rangeBox = document.getElementById('rangeDatePickerBox');
 
   if (mode === 'range') {
-    tabRange.className = "flex-1 min-h-[40px] rounded-lg bg-white shadow-xs text-indigo-700 font-bold transition";
-    tabSingle.className = "flex-1 min-h-[40px] rounded-lg text-slate-600 font-bold transition";
+    tabRange.className = "flex-1 min-h-[40px] rounded-lg bg-white shadow-xs text-indigo-700 font-semibold transition";
+    tabSingle.className = "flex-1 min-h-[40px] rounded-lg text-slate-600 font-semibold transition";
     rangeBox.classList.remove('hidden');
     document.getElementById('inputRangeStart').value = state.selectedDateKey;
     document.getElementById('inputRangeEnd').value = state.selectedDateKey;
@@ -46,8 +47,8 @@ export function setEditMode(mode) {
       if (el) el.checked = true;
     });
   } else {
-    tabSingle.className = "flex-1 min-h-[40px] rounded-lg bg-white shadow-xs text-indigo-700 font-bold transition";
-    tabRange.className = "flex-1 min-h-[40px] rounded-lg text-slate-600 font-bold transition";
+    tabSingle.className = "flex-1 min-h-[40px] rounded-lg bg-white shadow-xs text-indigo-700 font-semibold transition";
+    tabRange.className = "flex-1 min-h-[40px] rounded-lg text-slate-600 font-semibold transition";
     rangeBox.classList.add('hidden');
   }
 }
@@ -134,12 +135,14 @@ export function openEditModal(dateKey = state.selectedDateKey) {
       inputGfCustom.value = dayData.gf.type;
     }
     document.getElementById('inputGfDestination').value = dayData.gf.destination || '';
+    setVal('inputGfFlight', dayData.gf.flight || '');
     document.getElementById('inputGfTimeStart').value = dayData.gf.start || '';
     document.getElementById('inputGfTimeEnd').value = dayData.gf.end || '';
   } else {
     gfSelect.value = "퀵턴";
     wrapGfCustom.classList.add('hidden');
     inputGfCustom.value = '';
+    setVal('inputGfFlight', '');
     autoFillGfTime();
   }
 
@@ -211,6 +214,14 @@ export function saveModalChanges() {
     isQuickTurn: (gfFinalType === '퀵턴'),
     isPureStay: (gfFinalType === '체류' && !gStart && !gEnd)
   };
+  // 편명 (v2.3.0): 적었으면 저장. 단일 수정에서 원래 있던 편명을 지웠으면 '' 로 지움.
+  // 비워 둔 일괄 수정은 키를 안 넣어 기존 편명(같은 근무 형태일 때)을 그대로 둠 (mergeGf)
+  const flightVal = ((document.getElementById('inputGfFlight') || {}).value || '').trim().replace(/\s+/g, ' ').toUpperCase();
+  const prevGf = (state.scheduleDB[state.selectedDateKey] || {}).gf;
+  const noFlightType = gfFinalType === 'OFF' || /^(SBY|IS[A-D]|GS[A-D])$/.test(gfFinalType);
+  if (noFlightType) { /* 비행 아닌 근무: 편명 없음 */ }
+  else if (flightVal) gfObj.flight = flightVal;
+  else if (state.currentEditMode !== 'range' && prevGf && prevGf.flight) gfObj.flight = '';
 
   const dateObj = (dStart || dEnd || dMemo) ? {
     time: dStart && dEnd ? `${dStart}~${dEnd}` : (dStart || dEnd || ''),

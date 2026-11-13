@@ -16,10 +16,9 @@ import {
 import {
   openUploadModalForCurrentMonth, closeUploadModal, onMonthSelectorChange, onFileSelected,
   toggleApiKeyInput, onApiKeyChanged, onGeminiModelChanged, toggleCloudSyncInput, clearTargetMonthData, processUploadFiles,
-  onAirlabsKeyChanged
+  onAirlabsKeyChanged, checkAirlabsConnection
 } from './ui/upload-modal.js';
 import { cancelRecognizePreview, applyRecognizePreview } from './ui/recognize-preview.js';
-import { onRecoPrefsChanged } from './ui/reco-prefs.js';
 import { fbLoginFromForm, fbLogout } from './ui/login.js';
 import { downloadBackup, openRestorePicker, onBackupFileSelected } from './ui/backup-ui.js';
 
@@ -35,9 +34,9 @@ export const handlers = {
   // 업로드 / 설정
   openUploadModalForCurrentMonth, closeUploadModal, onMonthSelectorChange, onFileSelected,
   toggleApiKeyInput, onApiKeyChanged, onGeminiModelChanged, toggleCloudSyncInput, onFirebaseUrlChanged, clearTargetMonthData, processUploadFiles,
-  onAirlabsKeyChanged,
-  // 인식 결과 미리보기 / 데이트 추천 기준
-  cancelRecognizePreview, applyRecognizePreview, onRecoPrefsChanged,
+  onAirlabsKeyChanged, checkAirlabsConnection,
+  // 인식 결과 미리보기
+  cancelRecognizePreview, applyRecognizePreview,
   // 로그인
   fbLoginFromForm, fbLogout,
   // 백업 / 복원

@@ -22,11 +22,11 @@ export function renderCustomAnivList() {
     row.className = 'flex justify-between items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 text-[14px]';
 
     const nameSpan = document.createElement('span');
-    nameSpan.className = 'font-bold text-amber-800 break-all';
+    nameSpan.className = 'font-semibold text-amber-800 break-all';
     nameSpan.textContent = `🎂 ${aniv.name} `;
     if (aniv.isRepeat) {
       const rep = document.createElement('span');
-      rep.className = 'text-[11px] bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded font-bold';
+      rep.className = 'text-[11px] bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded font-semibold';
       rep.textContent = '매년 반복';
       nameSpan.appendChild(rep);
     }

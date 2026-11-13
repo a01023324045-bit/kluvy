@@ -31,12 +31,12 @@ export function updateFbLoginUI() {
   if (!status) return;
   if (fbIsLoggedIn()) {
     status.textContent = `동기화 계정: ${localStorage.getItem(STORAGE_KEYS.loginEmail) || '로그인됨'}`;
-    status.className = 'text-[13px] font-bold text-emerald-800';
+    status.className = 'text-[13px] font-semibold text-emerald-800';
     form && form.classList.add('hidden');
     logoutBtn && logoutBtn.classList.remove('hidden');
   } else {
     status.textContent = '동기화 계정: 로그인 안 됨';
-    status.className = 'text-[13px] font-bold text-slate-600';
+    status.className = 'text-[13px] font-semibold text-slate-600';
     form && form.classList.remove('hidden');
     logoutBtn && logoutBtn.classList.add('hidden');
   }

@@ -4,6 +4,8 @@
 //        내용이 같은 날은 '변경 없음'(기본 숨김). [캘린더에 반영]을 눌러야 저장된다.
 // 데이터는 모두 textContent / input.value 로만 넣는다 (innerHTML 에 사진에서 읽은 글자를 넣지 않음).
 import { weekdayOfKey } from '../dates.js';
+import { stayKstInfo } from '../timezone.js';
+import { isFlightDuty } from './flight-card.js';
 import { mapGeminiItem } from '../parsers/gemini-yejin.js';
 import { parseKyuhoShiftRule } from '../parsers/excel-kyuho.js';
 import { STATUS_LABEL, CHECK_MEANING, describeDuty, summarizeRows, isBlankDuty } from '../upload-merge.js';
@@ -17,6 +19,7 @@ export function finalizePreviewRow(row, edits = {}) {
   const start = edits.start !== undefined ? String(edits.start).trim() : undefined;
   const end = edits.end !== undefined ? String(edits.end).trim() : undefined;
   const dest = edits.destination !== undefined ? String(edits.destination).trim() : undefined;
+  const flight = edits.flight !== undefined ? String(edits.flight).trim().replace(/\s+/g, ' ').toUpperCase() : undefined;
   const typeChanged = type !== undefined && type !== String(row.value.type || '');
   if (row.who === 'my') {
     let v = typeChanged ? parseKyuhoShiftRule(type, row.dateKey) : { ...row.value };
@@ -25,12 +28,13 @@ export function finalizePreviewRow(row, edits = {}) {
     return v;
   }
   if (typeChanged) {
-    return mapGeminiItem({ ...row.raw, type, start: start ?? row.value.start ?? '', end: end ?? row.value.end ?? '', destination: dest ?? row.value.destination ?? '' });
+    return mapGeminiItem({ ...row.raw, type, start: start ?? row.value.start ?? '', end: end ?? row.value.end ?? '', destination: dest ?? row.value.destination ?? '', flight: flight ?? row.value.flight ?? '' });
   }
   const v = { ...row.value };
   if (start !== undefined) v.start = start;
   if (end !== undefined) v.end = end;
   if (dest !== undefined && 'destination' in row.value) v.destination = dest;
+  if (flight !== undefined && flight !== String(row.value.flight || '')) v.flight = flight; // v2.3.0: 편명 직접 입력·수정
   if ((start !== undefined || end !== undefined) && v.timesFrom) delete v.timesFrom; // 직접 고쳤으면 시간표 표시 해제
   return v;
 }
@@ -154,6 +158,12 @@ export function openRecognizePreview(opts) {
       destIn.addEventListener('input', () => { row.edits.destination = destIn.value; touch(); });
       edit.appendChild(destIn);
     }
+    if (row.who === 'gf' && isFlightDuty(row.value)) {
+      // v2.3.0: 사진에서 편명이 빠졌으면 여기서 직접 넣기 (예: TW405 또는 TW501 ICN-SYD)
+      const flIn = input('pv-flight pv-input', row.value.flight || '', { placeholder: '편명', autocapitalize: 'characters', 'aria-label': '편명' });
+      flIn.addEventListener('input', () => { row.edits.flight = flIn.value; touch(); });
+      edit.appendChild(flIn);
+    }
     const sIn = input('pv-start pv-input pv-time', row.value.start, { placeholder: '--:--', inputmode: 'numeric', 'aria-label': '시작' });
     const eIn = input('pv-end pv-input pv-time', row.value.end, { placeholder: '--:--', inputmode: 'numeric', 'aria-label': '끝' });
     sIn.addEventListener('input', () => { row.edits.start = sIn.value; touch(); });
@@ -162,6 +172,25 @@ export function openRecognizePreview(opts) {
     timeWrap.append(sIn, el('span', 'pv-tilde', '~'), eIn);
     edit.appendChild(timeWrap);
     td.appendChild(edit);
+
+    // 예진 체류 비행: 한국시각 미리 보기 (달력 칸·상세 카드와 같은 함수 stayKstInfo) — 미등록 도시는 '(KR ?)'
+    if (row.who === 'gf') {
+      const kst = el('div', 'pv-kst hidden');
+      const refreshKst = () => {
+        const v = { ...row.value, ...row.edits };
+        if (row.edits.type !== undefined && row.edits.type !== row.value.type) v.isQuickTurn = v.type === '퀵턴';
+        const k = stayKstInfo(v, row.dateKey);
+        const show = Boolean(k && k.status !== 'same');
+        kst.classList.toggle('hidden', !show);
+        kst.classList.toggle('is-unknown', Boolean(k && k.status === 'unknown'));
+        kst.textContent = !show ? '' : k.status === 'unknown'
+          ? `🕒 한국시각 ${k.text} — '${v.destination || '(도시 없음)'}' 시간대 미등록`
+          : `🕒 ${k.kind === 'departure' ? '출발' : '도착'} 한국시각 ${k.text}`;
+      };
+      for (const inp of [typeIn, sIn, eIn, edit.querySelector('.pv-dest')]) if (inp) inp.addEventListener('input', refreshKst);
+      refreshKst();
+      td.appendChild(kst);
+    }
 
     // 3줄: 기존 값 → 새 값 / 안내
     const diff = el('div', 'pv-diff');

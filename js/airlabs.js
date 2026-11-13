@@ -10,6 +10,9 @@
 //      ※ 무료 플랜은 일부 필드만 준다(문서의 'Available in the Free plan' = 예정 시각·공항·편명). 예상·실제·지연은 없을 수 있음.
 //  - Routes API  GET /api/v9/routes?airline_iata=TW&flight_iata=TW405 : 정기 노선 DB(실시간 아님) — dep_time·arr_time(HH:MM 현지), days(요일)
 //  - Schedules API 는 최대 10시간 앞까지만이라 쓰지 않음.
+//  - Ping  GET /api/v9/ping?api_key=… : 키 확인용 ([N월 등록] → 「✈️ AirLabs」 → [연결 확인])
+// 사용자 확인(2026-11-14): 모든 응답이 HTTP 200, 오류는 본문 {"error":{"message","code"}} —
+//   키 없음 = wrong_params "Missing api_key", 틀린 키 = unknown_api_key "Unknown api_key". CORS 허용(access-control-allow-origin: *)
 import { weekdayOfKey } from './dates.js';
 
 export const AIRLABS_FREE_MONTHLY = 1000;     // 무료 플랜 월 요청 수 (cors.dev 2026-10 조사·사용자 조사 기준)
@@ -17,7 +20,7 @@ export const AIRLABS_LIVE_TTL_MIN = 30;       // 같은 편·같은 날짜 실�
 export const AIRLABS_ROUTE_TTL_DAYS = 7;      // 정기 노선 재조회 최소 간격
 
 const ERR = {
-  unknown_api_key: 'AirLabs API 키가 올바르지 않습니다. [설정]에서 키를 확인해 주세요.',
+  unknown_api_key: 'AirLabs API 키가 올바르지 않습니다. [N월 등록] → 「✈️ AirLabs」 칸의 키를 확인해 주세요.',
   expired_api_key: 'AirLabs API 키가 만료되었습니다. airlabs.co 대시보드에서 확인해 주세요.',
   wrong_params: '편명 형식을 AirLabs 가 이해하지 못했습니다.',
   not_found: 'AirLabs 에 이 편의 정보가 없습니다.',
@@ -30,7 +33,35 @@ const ERR = {
 export function airlabsErrorMessage(err) {
   if (!err) return '';
   const code = typeof err === 'string' ? err : err.code;
-  return ERR[code] || `AirLabs 오류: ${(typeof err === 'object' && err.message) || code}`;
+  const msg = typeof err === 'object' ? String(err.message || '') : '';
+  if (code === 'wrong_params' && /api_key/i.test(msg)) return 'AirLabs API 키가 비어 있습니다. [N월 등록] → 「✈️ AirLabs」 칸에 키를 넣어 주세요.';
+  return ERR[code] || `AirLabs 오류: ${msg || code}`;
+}
+
+/** 오류를 화면에 보일 글: 한글 설명 + AirLabs 원문(message · code) + HTTP 상태 */
+export function airlabsErrorDetail(err, httpStatus) {
+  if (!err) return '';
+  const code = typeof err === 'string' ? err : String(err.code || '');
+  const msg = typeof err === 'object' ? String(err.message || '') : '';
+  const raw = [msg && `"${msg}"`, code && `code ${code}`, httpStatus && `HTTP ${httpStatus}`].filter(Boolean).join(' · ');
+  return raw ? `${airlabsErrorMessage(err)} (AirLabs 원문: ${raw})` : airlabsErrorMessage(err);
+}
+
+/**
+ * 붙여넣은 키 정리: 앞뒤 공백·줄바꿈·따옴표 제거, 중간 공백/줄바꿈 제거, 'api_key=' 접두어 제거.
+ * 예) '  "abcd-1234"\n' → 'abcd-1234'
+ */
+export function cleanAirlabsKey(raw) {
+  let s = String(raw ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  for (let i = 0; i < 3; i++) s = s.replace(/^["'`“”‘’\s]+|["'`“”‘’\s]+$/g, '').replace(/^api_key\s*[=:]\s*/i, '');
+  return s.replace(/\s+/g, '');
+}
+
+/** 저장 확인용 가림: '…AB12' (4자 이하면 전부 가림) */
+export function maskKey(k) {
+  const s = String(k || '');
+  if (!s) return '';
+  return s.length <= 4 ? '•'.repeat(s.length) : `…${s.slice(-4)}`;
 }
 
 /** 'YYYY-MM-DD HH:MM' → { date, time } (아니면 null) */
