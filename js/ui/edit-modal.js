@@ -5,6 +5,9 @@ import { applyEditToDates, defaultTimesFor, GF_DEFAULT_TIMES, KYUHO_SHIFTS, KYUH
 import { saveDB } from '../firebase-sync.js';
 import { renderCalendar } from '../render/calendar.js';
 import { learnFlightFromGf } from '../flight-times.js';
+import { gfFlights, flightLabel, flightFieldsFromInputs } from '../flight.js';
+
+const FLIGHT_INPUTS = ['inputGfFlight', 'inputGfFlight2', 'inputGfFl1Std', 'inputGfFl1Sta', 'inputGfFl2Std', 'inputGfFl2Sta'];
 
 /** 편집창 규호 근무 목록 (select 의 option 과 같게 유지) */
 export const PREDEFINED_MY = ["조근", "공휴일조근", "석근", "공휴일석근", "석5", "공휴일석5", "석1", "일근", "O", "대휴", "휴가", "연차", "TS-3", "TS-1", "연수"];
@@ -17,7 +20,7 @@ let openedSnapshot = null;
 function readSection(name) {
   const v = id => (document.getElementById(id) || {}).value || '';
   if (name === 'my') return JSON.stringify([v('selectMyShiftType'), v('inputMyShiftCustom').trim(), v('inputMyTimeStart'), v('inputMyTimeEnd')]);
-  if (name === 'gf') return JSON.stringify([v('selectGfShiftType'), v('inputGfShiftCustom').trim(), v('inputGfDestination').trim(), v('inputGfTimeStart'), v('inputGfTimeEnd'), v('inputGfFlight').trim()]);
+  if (name === 'gf') return JSON.stringify([v('selectGfShiftType'), v('inputGfShiftCustom').trim(), v('inputGfDestination').trim(), v('inputGfTimeStart'), v('inputGfTimeEnd'), ...FLIGHT_INPUTS.map(id => v(id).trim())]);
   return JSON.stringify([v('inputDateTimeStart'), v('inputDateTimeEnd'), v('inputDateMemo'), v('inputMyPromise').trim(), v('inputGfPromise').trim()]);
 }
 function setVal(id, v) { const e = document.getElementById(id); if (e) e.value = v; }
@@ -135,14 +138,14 @@ export function openEditModal(dateKey = state.selectedDateKey) {
       inputGfCustom.value = dayData.gf.type;
     }
     document.getElementById('inputGfDestination').value = dayData.gf.destination || '';
-    setVal('inputGfFlight', dayData.gf.flight || '');
+    fillFlightInputs(dayData.gf);
     document.getElementById('inputGfTimeStart').value = dayData.gf.start || '';
     document.getElementById('inputGfTimeEnd').value = dayData.gf.end || '';
   } else {
     gfSelect.value = "퀵턴";
     wrapGfCustom.classList.add('hidden');
     inputGfCustom.value = '';
-    setVal('inputGfFlight', '');
+    fillFlightInputs(null);
     autoFillGfTime();
   }
 
@@ -155,6 +158,24 @@ export function openEditModal(dateKey = state.selectedDateKey) {
 
   openedSnapshot = snapshotForm();
   document.getElementById('editModal').classList.remove('hidden');
+}
+
+/** v2.3.1: 편명 칸(가는 편·오는 편)과 편별 이륙·착륙(직접 입력) 칸 채우기 */
+function fillFlightInputs(gf) {
+  const legs = gfFlights(gf);
+  if (!legs.length) {
+    // 알아볼 수 없는 편명 글자는 그대로 보여 줌 (지우지 않게)
+    setVal('inputGfFlight', gf && gf.flight ? gf.flight : '');
+    for (const id of FLIGHT_INPUTS.slice(1)) setVal(id, '');
+    return;
+  }
+  const l1 = legs[0], l2 = legs[1];
+  setVal('inputGfFlight', flightLabel(l1));
+  setVal('inputGfFlight2', l2 ? flightLabel(l2) : '');
+  setVal('inputGfFl1Std', l1.source === 'manual' ? l1.std : '');
+  setVal('inputGfFl1Sta', l1.source === 'manual' ? l1.sta : '');
+  setVal('inputGfFl2Std', l2 && l2.source === 'manual' ? l2.std : '');
+  setVal('inputGfFl2Sta', l2 && l2.source === 'manual' ? l2.sta : '');
 }
 
 export function closeEditModal() {
@@ -216,12 +237,14 @@ export function saveModalChanges() {
   };
   // 편명 (v2.3.0): 적었으면 저장. 단일 수정에서 원래 있던 편명을 지웠으면 '' 로 지움.
   // 비워 둔 일괄 수정은 키를 안 넣어 기존 편명(같은 근무 형태일 때)을 그대로 둠 (mergeGf)
-  const flightVal = ((document.getElementById('inputGfFlight') || {}).value || '').trim().replace(/\s+/g, ' ').toUpperCase();
+  // v2.3.1: 가는 편·오는 편 + 편별 이륙/착륙 직접 입력 → gf.flight(가는 편, v2.3.0 호환) + gf.flights([가는 편, 오는 편])
+  const val = id => ((document.getElementById(id) || {}).value || '').trim();
+  const fl = flightFieldsFromInputs({ f1: val('inputGfFlight'), f2: val('inputGfFlight2'), s1: val('inputGfFl1Std'), a1: val('inputGfFl1Sta'), s2: val('inputGfFl2Std'), a2: val('inputGfFl2Sta') });
   const prevGf = (state.scheduleDB[state.selectedDateKey] || {}).gf;
   const noFlightType = gfFinalType === 'OFF' || /^(SBY|IS[A-D]|GS[A-D])$/.test(gfFinalType);
   if (noFlightType) { /* 비행 아닌 근무: 편명 없음 */ }
-  else if (flightVal) gfObj.flight = flightVal;
-  else if (state.currentEditMode !== 'range' && prevGf && prevGf.flight) gfObj.flight = '';
+  else if (fl.flight) { gfObj.flight = fl.flight; gfObj.flights = fl.flights; }
+  else if (state.currentEditMode !== 'range' && prevGf && (prevGf.flight || prevGf.flights)) { gfObj.flight = ''; gfObj.flights = null; }
 
   const dateObj = (dStart || dEnd || dMemo) ? {
     time: dStart && dEnd ? `${dStart}~${dEnd}` : (dStart || dEnd || ''),

@@ -14,6 +14,7 @@ import { stayKstInfo, kstDiffText, KST_UNKNOWN } from '../timezone.js';
 import { calculateBarPosition, kyuhoKind, gfKind } from '../schedule-model.js';
 import { getAnniversaryInfo } from '../anniversary.js';
 import { renderFlightBox } from '../ui/flight-card.js';
+import { flightsText } from '../flight.js';
 
 // 4글자 이상(예: 비슈케크·타이베이)은 좁은 칸에서 '…'으로 잘리지 않게 자간·여백을 줄인다 (app.css .duty--long)
 function longLabelClass(label) {
@@ -133,7 +134,7 @@ export function updateDetailCard() {
       let desc = `${dest ? '✈️ ' + dest + ' ' : ''}${!dest ? g.type + ' ' : ''}(${g.start} ~ ${g.end})`;
       const k = stayKstInfo(g, selectedDateKey); // 달력 칸과 같은 함수
       if (k && k.status !== 'same') desc += ` [${k.kind === 'departure' ? '출발' : '도착'} KST: ${k.text}]`;
-      if (g.flight) desc += ` [${g.flight}]`;
+      if (g.flight) desc += ` [${flightsText(g)}]`;
       gfText.innerText = desc;
     } else {
       clearBar(gfBar);
@@ -196,7 +197,7 @@ function yejinDuty(g) {
   const yLabel = gfCellLabel(g);
   const d = el('div', `duty duty--y duty--${kind}${longLabelClass(yLabel)}`, yLabel);
   d.dataset.kind = `y-${kind}`;
-  d.title = `예진 ${g.destination ? g.destination + ' ' : ''}${g.type}${g.start ? ` ${g.start}~${g.end}` : ''}${g.flight ? ` ${g.flight}` : ''}`;
+  d.title = `예진 ${g.destination ? g.destination + ' ' : ''}${g.type}${g.start ? ` ${g.start}~${g.end}` : ''}${g.flight ? ` ${flightsText(g)}` : ''}`;
   return d;
 }
 
@@ -485,23 +486,60 @@ async function rasterizeSvg(svg, scale, { icon = true } = {}) {
   return out.toDataURL('image/png');
 }
 
+// v2.3.1: 캡처 복제본에서 글줄이 늘어나지 않게 —
+//  modern-screenshot 은 각 요소의 계산된 폭(px)을 복제본에 그대로 박는다. 폰에서 복제본 글자가 화면보다 조금 넓게 그려지면
+//  (대체 글꼴·텍스트 배율·반올림) 고정 폭을 넘은 글이 공백에서 줄바꿈된다 → 헤더 '2026. 11' 이 '2026.' / '11' 두 줄이 되고
+//  헤더 높이·화살표 위치가 달라졌다(사용자 제보). 화면에서 한 줄인 글은 복제본에서도 줄바꿈 금지, 헤더 제목(data-cap-fit)은 폭 고정 해제.
+const CAP_1LINE = 'data-cap-1line';
+export function markSingleLineTexts(root) {
+  const marked = [];
+  for (const e of root.querySelectorAll('*')) {
+    if (!Array.from(e.childNodes).some(n => n.nodeType === 3 && n.textContent.trim())) continue;
+    const cs = getComputedStyle(e);
+    if (cs.display === 'none' || /^(nowrap|pre)$/.test(cs.whiteSpace)) continue;
+    const r = document.createRange();
+    r.selectNodeContents(e);
+    const tops = Array.from(r.getClientRects()).filter(x => x.width > 0 && x.height > 0).map(x => x.top).sort((a, b) => a - b);
+    const lineH = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2 || 14;
+    const lines = tops.reduce((n, t, i) => (i && t - tops[i - 1] > lineH / 2 ? n + 1 : n), tops.length ? 1 : 0);
+    if (lines === 1) { e.setAttribute(CAP_1LINE, ''); marked.push(e); }
+  }
+  return marked;
+}
+export function fixCloneLines(clone) {
+  if (!clone || !clone.querySelectorAll) return;
+  const all = [clone, ...clone.querySelectorAll(`[${CAP_1LINE}], [data-cap-fit]`)];
+  for (const n of all) {
+    if (!n.style || !n.hasAttribute) continue;
+    if (n.hasAttribute(CAP_1LINE) || n.hasAttribute('data-cap-fit')) n.style.setProperty('white-space', 'nowrap', 'important');
+    if (n.hasAttribute('data-cap-fit')) {
+      n.style.setProperty('width', 'auto', 'important');
+      n.style.setProperty('min-width', 'max-content', 'important');
+      n.style.setProperty('flex-shrink', '0', 'important');
+    }
+  }
+}
+
 /** 캡처 대상 → PNG data URL (테스트에서도 사용) */
 export async function renderCalendarImage(target) {
   await waitFonts();
   const scale = Math.min(3, Math.max(2, Math.round(window.devicePixelRatio || 2)));
+  const marked = markSingleLineTexts(target);
   try {
     const ms = await loadModernScreenshot();
     const fonts = await captureFontCss();
-    const svg = await ms.domToForeignObjectSvg(target, { backgroundColor: '#ffffff', timeout: 20000, font: fonts.css ? { cssText: fonts.css } : { preferredFormat: 'woff2' } });
+    const svg = await ms.domToForeignObjectSvg(target, { backgroundColor: '#ffffff', timeout: 20000, font: fonts.css ? { cssText: fonts.css } : { preferredFormat: 'woff2' }, onCloneNode: fixCloneLines });
     return await rasterizeSvg(svg, scale, { icon: fonts.icon });
   } catch (err) {
     console.warn('달력 캡처: modern-screenshot 실패 → html2canvas 로 대체', err);
     await loadScript(HTML2CANVAS_URL);
     const canvas = await window.html2canvas(target, {
       scale, useCORS: true, backgroundColor: '#ffffff', logging: false, scrollY: 0, scrollX: 0,
-      onclone: doc => doc.documentElement.classList.add('cap-h2c')
+      onclone: doc => { doc.documentElement.classList.add('cap-h2c'); fixCloneLines(doc.getElementById(target.id) || doc.body); }
     });
     return canvas.toDataURL('image/png');
+  } finally {
+    for (const e of marked) e.removeAttribute(CAP_1LINE);
   }
 }
 

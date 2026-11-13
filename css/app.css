@@ -92,6 +92,8 @@ input[type="text"], input[type="email"], input[type="password"], input[type="tim
 .cal-cell:nth-child(7n) { border-right: 0; }
 .cal-cell.is-empty { background: #fafbfc; cursor: default; }
 .cal-cell.is-selected { box-shadow: inset 0 0 0 2px var(--kv-select); border-radius: 6px; z-index: 1; }
+/* v2.3.1: 달력 위 연·월 — 캡처 이미지에서 '2026.' / '11' 두 줄로 쪼개지던 문제 (복제본에 고정 폭이 박힌 채 글자가 조금 넓게 그려지면 공백에서 줄바꿈) */
+.cal-month-title { white-space: nowrap; flex-shrink: 0; min-width: max-content; text-align: center; }
 .cal-top { display: flex; align-items: center; justify-content: space-between; height: 20px; flex-shrink: 0; }
 .cal-day { font-size: var(--kv-fs-cell-day); font-weight: var(--kv-w-title); line-height: 20px; min-width: 20px; height: 20px; text-align: center; color: var(--kv-text); font-variant-numeric: tabular-nums; }
 .cal-day.is-sun { color: var(--kv-sun); }
@@ -163,6 +165,24 @@ input[type="text"], input[type="email"], input[type="password"], input[type="tim
 .flight-box .fl-btn[disabled] { opacity: .6; }
 .flight-box .fl-msg { font-size: 12px; color: var(--kv-text-2); margin-top: 4px; }
 .flight-box .fl-msg--err { color: #be123c; font-weight: var(--kv-w-strong); }
+/* v2.3.1 왕복(한 상자에 편마다 한 줄)·AirLabs 정기/예상/실제 라벨 */
+.flight-box .fl-leg-row { padding: 4px 0; border-top: 1px dashed #bae6fd; }
+.flight-box .fl-title + .fl-leg-row { border-top: 0; }
+.flight-box .fl-leg-line { line-height: 1.5; word-break: keep-all; }
+.flight-box .fl-leg-no { font-weight: var(--kv-w-title); }
+.flight-box .fl-leg-tag { font-size: 12px; }
+.flight-box .fl-live--compact { margin-top: 2px; padding: 4px 8px; font-size: 12px; }
+.flight-box .fl-time { font-weight: var(--kv-w-title); }
+.flight-box .fl-time--est, .flight-box .fl-time--act { color: #b45309; }
+.flight-box .fl-time--sched { color: var(--kv-text-2); }
+.flight-box .fl-src--manual { color: #047857; font-weight: var(--kv-w-strong); }
+.flight-box .fl-src--estimated, .flight-box .fl-src--actual { color: #b45309; font-weight: var(--kv-w-strong); }
+.flight-box .fl-al-sum { font-weight: var(--kv-w-strong); margin: 2px 0; }
+.flight-box .fl-al-line { line-height: 1.45; }
+.flight-box .fl-al-strong { color: #b45309; font-weight: var(--kv-w-title); }
+.flight-box .fl-al--scheduled { color: var(--kv-text-2); }
+.flight-box .fl-warn { color: #b45309; font-weight: var(--kv-w-strong); margin-top: 2px; }
+.flight-box .fl-manual { color: #047857; border-color: #6ee7b7; }
 
 /* 미리보기 (등록 확인) */
 .pv-row.is-off .pv-edit, .pv-row.is-off .pv-date, .pv-row.is-off .pv-who { opacity: .55; }
@@ -189,7 +209,7 @@ input[type="text"], input[type="email"], input[type="password"], input[type="tim
 .pv-input { font-size: var(--kv-fs-input); height: 40px; padding: 0 8px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: var(--kv-text); min-width: 0; }
 .pv-type { width: 7.2rem; font-weight: var(--kv-w-strong); }
 .pv-dest { width: 6rem; }
-.pv-flight { width: 7.5rem; text-transform: uppercase; }
+.pv-flight, .pv-flight2 { width: 9.2rem; text-transform: uppercase; letter-spacing: -0.02em; } /* v2.3.1: 'TW721 GMP-CJU' 가 잘리지 않게 */
 .pv-times { display: inline-flex; align-items: center; gap: 2px; }
 .pv-time { width: 4.4rem; font-variant-numeric: tabular-nums; text-align: center; padding: 0 4px; }
 .pv-tilde { color: var(--kv-text-3); }

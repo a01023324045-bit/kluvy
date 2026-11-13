@@ -12,9 +12,9 @@ import { AIRLABS_KEY_STORAGE, AIRLABS_USAGE_STORAGE, FLIGHT_TIMES_CACHE, STORAGE
 import { safeGetStorage, safeSetStorage } from './storage.js';
 import { dbFetch, dbGetJson, getDbBaseUrl } from './db-rest.js';
 import { SV_TIMESTAMP } from './sync-core.js';
-import { learnableFromGf, normalizeFlight, fillGfFromTimetable } from './flight.js';
+import { learnableLegs, normalizeFlight, fillGfFromTimetable } from './flight.js';
 import {
-  airlabsUrl, chooseEndpoint, parseAirlabsFlight, parseAirlabsRoutes, airlabsErrorDetail, cleanAirlabsKey,
+  airlabsUrl, chooseEndpoint, parseAirlabsFlight, parseAirlabsRoutes, airlabsErrorDetail, cleanAirlabsKey, dateWithDow,
   AIRLABS_LIVE_TTL_MIN, AIRLABS_ROUTE_TTL_DAYS, AIRLABS_FREE_MONTHLY
 } from './airlabs.js';
 import { getKSTDate, makeDateKey } from './dates.js';
@@ -79,26 +79,34 @@ async function pushPending() {
 }
 
 /**
- * 확정된 근무(미리보기 반영·수동 편집)에서 편명 시각을 배운다.
+ * 확정된 근무(미리보기 반영·수동 편집)에서 편명 시각을 편별로 배운다 (v2.3.1: 왕복이면 편마다).
+ *  - 체류 비행 1편의 근무표 시각 → 그 편 시간표를 갱신 (기존과 같음)
+ *  - 편집창에서 편마다 직접 넣은 시각(source 'manual') → 그날의 지연 시각일 수 있어 서버 시간표에 그 편 시각이 없을 때만 채움
  * @param {object} gf
  * @param {'schedule'|'manual'} source
- * @returns {string|null} 배운 편명
+ * @returns {string|null} 배운 편명(여러 개면 쉼표로)
  */
 export function learnFlightFromGf(gf, source = 'schedule') {
-  const L = learnableFromGf(gf);
-  if (!L) return null;
+  const items = learnableLegs(gf, source);
+  if (!items.length) return null;
   const t = getFlightTable();
-  const cur = t[L.code] || {};
-  if (cur.std === L.std && cur.sta === L.sta && cur.dep === L.dep && cur.arr === L.arr) return null;
-  const entry = { dep: L.dep, arr: L.arr, std: L.std, sta: L.sta, source, updatedBy: email() };
-  t[L.code] = { ...cur, ...entry, updatedAt: Date.now() };
-  persist();
   const pending = safeGetStorage(PENDING_KEY, {}) || {};
-  pending[L.code] = entry;
+  const learned = [];
+  for (const L of items) {
+    const cur = t[L.code] || {};
+    if (cur.std === L.std && cur.sta === L.sta && cur.dep === L.dep && cur.arr === L.arr) continue;
+    if (L.perDay && (cur.std || cur.sta)) continue; // 하루치 직접 입력(지연 시각일 수 있음)은 기존 시간표(정기 포함)를 덮지 않음
+    const entry = { dep: L.dep, arr: L.arr, std: L.std, sta: L.sta, source: L.source, updatedBy: email() };
+    t[L.code] = { ...cur, ...entry, updatedAt: Date.now() };
+    pending[L.code] = entry;
+    learned.push(L.code);
+  }
+  if (!learned.length) return null;
+  persist();
   safeSetStorage(PENDING_KEY, pending);
   pushPending();
   notify();
-  return L.code;
+  return learned.join(',');
 }
 
 /** 시각이 빠진 비행 근무 → 시간표로 채운 gf (못 채우면 null) */
@@ -189,6 +197,8 @@ export async function lookupFlightOnAirlabs(flightStr, dateKey, { force = false,
   const k = getKSTDate();
   const todayKey = makeDateKey(k.getFullYear(), k.getMonth() + 1, k.getDate());
   let kind = chooseEndpoint(dateKey, todayKey);
+  let liveMsg = '';
+  let liveOk = false;
 
   if (kind === 'flight') {
     const c = cur.days && cur.days[dateKey];
@@ -200,32 +210,47 @@ export async function lookupFlightOnAirlabs(flightStr, dateKey, { force = false,
     const p = parseAirlabsFlight(json, dateKey);
     if (p.error && p.error.code !== 'not_found') return { ok: false, message: airlabsErrorDetail(p.error, json._http) };
     if (!p.error && p.match) {
-      const day = { std: p.std, sta: p.sta, staDate: p.staDate, etd: p.etd, eta: p.eta, atd: p.atd, ata: p.ata, status: p.status, depDelay: p.depDelay, arrDelay: p.arrDelay, dep: p.dep, arr: p.arr, fetchedAt: now };
+      const day = { std: p.std, sta: p.sta, staDate: p.staDate, depDate: p.depDate, etd: p.etd, eta: p.eta, atd: p.atd, ata: p.ata, status: p.status, depDelay: p.depDelay, arrDelay: p.arrDelay, delayCalc: p.delayCalc || false, dep: p.dep, arr: p.arr, fetchedAt: now };
       t[f.iata] = { ...cur, days: { ...(cur.days || {}), [dateKey]: day } };
       if (!cur.std && !cur.sta) Object.assign(t[f.iata], { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, source: 'airlabs' });
       persist(); notify();
       const body = { [`flightTimes/${f.iata}/days/${dateKey}`]: { ...day, fetchedAt: SV_TIMESTAMP } };
       if (!cur.std && !cur.sta) Object.assign(body, { [`flightTimes/${f.iata}/dep`]: p.dep, [`flightTimes/${f.iata}/arr`]: p.arr, [`flightTimes/${f.iata}/std`]: p.std, [`flightTimes/${f.iata}/sta`]: p.sta, [`flightTimes/${f.iata}/source`]: 'airlabs', [`flightTimes/${f.iata}/updatedAt`]: SV_TIMESTAMP });
       patchFlight(body);
-      return { ok: true, kind, message: '실시간 정보를 받았습니다.' };
+      liveOk = true;
+      liveMsg = '실시간 정보를 받았습니다.'; // 운항 날짜·구간은 상자에 표시
+      // 운항 요일을 같이 보여 주려고 정기 노선도 (7일 캐시가 없을 때만) 한 번 더 묻는다
+      const a0 = (t[f.iata] || {}).airlabs;
+      if (!force && a0 && a0.fetchedAt && now - a0.fetchedAt < AIRLABS_ROUTE_TTL_DAYS * 86400000) return { ok: true, kind, message: liveMsg };
+    } else {
+      liveMsg = p.error ? 'AirLabs 실시간 정보에 이 편이 없어 정기 노선으로 봅니다. ' : `AirLabs 의 가장 가까운 운항이 ${dateWithDow(p.depDate)} 이라 정기 노선으로 봅니다. `;
+      kind = 'routes'; // 가장 가까운 운항이 다른 날짜 → 정기 노선으로
     }
-    kind = 'routes'; // 가장 가까운 운항이 다른 날짜 → 정기 노선으로
   }
 
-  const a = cur.airlabs;
-  if (!force && a && a.fetchedAt && now - a.fetchedAt < AIRLABS_ROUTE_TTL_DAYS * 86400000) {
-    return { ok: true, cached: true, kind, message: `정기 노선 정보는 ${AIRLABS_ROUTE_TTL_DAYS}일 안에 다시 묻지 않습니다 (캐시 사용).` };
+  const base = t[f.iata] || cur;
+  const a = base.airlabs;
+  if (!liveOk && !force && a && a.fetchedAt && now - a.fetchedAt < AIRLABS_ROUTE_TTL_DAYS * 86400000) {
+    return { ok: true, cached: true, kind, message: `${liveMsg}정기 노선 정보는 ${AIRLABS_ROUTE_TTL_DAYS}일 안에 다시 묻지 않습니다 (캐시 사용).` };
   }
   let json;
-  try { json = await callAirlabs('routes', { airline_iata: f.airline, flight_iata: f.iata }, key); } catch (e) { return { ok: false, message: netError(e) }; }
+  try { json = await callAirlabs('routes', { airline_iata: f.airline, flight_iata: f.iata }, key); } catch (e) {
+    return liveOk ? { ok: true, kind: 'flight', message: liveMsg } : { ok: false, message: netError(e) };
+  }
   const p = parseAirlabsRoutes(json, f.iata, dateKey);
-  if (p.error) return { ok: false, message: airlabsErrorDetail(p.error, json._http) };
-  const route = { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, days: p.days, fetchedAt: now };
-  t[f.iata] = { ...cur, airlabs: route };
-  if (!cur.std && !cur.sta) Object.assign(t[f.iata], { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, source: 'airlabs' });
+  if (p.error) {
+    if (liveOk) return { ok: true, kind: 'flight', message: `${liveMsg} (정기 노선: ${airlabsErrorDetail(p.error, json._http)})` };
+    return { ok: false, message: `${liveMsg}${airlabsErrorDetail(p.error, json._http)}` };
+  }
+  const route = { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, days: p.days, variants: p.variants, fetchedAt: now };
+  const now2 = t[f.iata] || {};
+  t[f.iata] = { ...now2, airlabs: route };
+  const fillTop = !now2.std && !now2.sta;
+  if (fillTop) Object.assign(t[f.iata], { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, source: 'airlabs' });
   persist(); notify();
   const body = { [`flightTimes/${f.iata}/airlabs`]: { ...route, fetchedAt: SV_TIMESTAMP } };
-  if (!cur.std && !cur.sta) Object.assign(body, { [`flightTimes/${f.iata}/dep`]: p.dep, [`flightTimes/${f.iata}/arr`]: p.arr, [`flightTimes/${f.iata}/std`]: p.std, [`flightTimes/${f.iata}/sta`]: p.sta, [`flightTimes/${f.iata}/source`]: 'airlabs', [`flightTimes/${f.iata}/updatedAt`]: SV_TIMESTAMP });
+  if (fillTop) Object.assign(body, { [`flightTimes/${f.iata}/dep`]: p.dep, [`flightTimes/${f.iata}/arr`]: p.arr, [`flightTimes/${f.iata}/std`]: p.std, [`flightTimes/${f.iata}/sta`]: p.sta, [`flightTimes/${f.iata}/source`]: 'airlabs', [`flightTimes/${f.iata}/updatedAt`]: SV_TIMESTAMP });
   patchFlight(body);
-  return { ok: true, kind, message: p.operatesThatDay ? '정기 노선 시각을 받았습니다.' : '정기 노선 시각을 받았습니다 (이 요일 운항 여부는 확인되지 않음).' };
+  if (liveOk) return { ok: true, kind: 'flight', message: liveMsg };
+  return { ok: true, kind, message: `${liveMsg}${p.operatesThatDay ? '정기 노선 시각을 받았습니다.' : '정기 노선 시각을 받았습니다 (이 날짜 요일은 정기 운항 요일이 아님 — 아래 ⚠️ 확인).'}` };
 }

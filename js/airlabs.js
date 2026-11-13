@@ -85,17 +85,24 @@ export function chooseEndpoint(dateKey, todayKey) {
 
 /**
  * Flight API 응답 → 우리 형식. dateKey(출발지 현지 날짜)와 운항일이 다르면 match:false
- * @returns {{error?:object, match?:boolean, dep, arr, std, sta, staDate, etd, eta, atd, ata, status, depDelay, arrDelay, depDate}}
+ *  - std/sta = dep_time/arr_time (그 편의 '정기(예정)' 시각 — 지연과 무관한 시간표 값)
+ *  - etd/eta = *_estimated (예상), atd/ata = *_actual (실제), depDelay/arrDelay = *_delayed (분)
+ *  - v2.3.1: depDate(운항 날짜 = dep_time 의 날짜) 저장, 지연(분)이 없으면 예상/실제 − 정기로 계산(delayFrom:'calc')
+ * @returns {{error?:object, match?:boolean, dep, arr, std, sta, staDate, etd, eta, atd, ata, status, depDelay, arrDelay, depDate, delayCalc?:boolean}}
  */
 export function parseAirlabsFlight(json, dateKey) {
   if (!json || typeof json !== 'object') return { error: { code: 'internal_error' } };
   if (json.error) return { error: json.error };
   let r = json.response !== undefined ? json.response : json;
-  if (Array.isArray(r)) r = r[0];
+  if (Array.isArray(r)) r = r.find(x => x && splitStamp(x.dep_time) && splitStamp(x.dep_time).date === dateKey) || r[0];
   const dep = splitStamp(r && r.dep_time);
   if (!r || !dep) return { error: { code: 'not_found' } };
   const t = (k) => { const x = splitStamp(r[k]); return x ? x.time : ''; };
   const arr = splitStamp(r.arr_time);
+  const num = v => (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+  let depDelay = num(r.dep_delayed), arrDelay = num(r.arr_delayed), delayCalc = false;
+  if (depDelay === null) { const d = stampDiffMin(r.dep_actual || r.dep_estimated, r.dep_time); if (d !== null) { depDelay = d; delayCalc = true; } }
+  if (arrDelay === null) { const d = stampDiffMin(r.arr_actual || r.arr_estimated, r.arr_time); if (d !== null) { arrDelay = d; delayCalc = true; } }
   return {
     match: dep.date === dateKey,
     depDate: dep.date,
@@ -104,16 +111,39 @@ export function parseAirlabsFlight(json, dateKey) {
     etd: t('dep_estimated'), eta: t('arr_estimated'),
     atd: t('dep_actual'), ata: t('arr_actual'),
     status: r.status || '',
-    depDelay: Number.isFinite(Number(r.dep_delayed)) && r.dep_delayed !== null ? Number(r.dep_delayed) : null,
-    arrDelay: Number.isFinite(Number(r.arr_delayed)) && r.arr_delayed !== null ? Number(r.arr_delayed) : null
+    depDelay, arrDelay, delayCalc
   };
 }
 
+/** 'YYYY-MM-DD HH:MM' 두 개의 차이(분) a − b (둘 중 하나라도 없으면 null) */
+export function stampDiffMin(a, b) {
+  const A = splitStamp(a), B = splitStamp(b);
+  if (!A || !B) return null;
+  const ms = s => { const [y, m, d] = s.date.split('-').map(Number); const [h, mi] = s.time.split(':').map(Number); return Date.UTC(y, m - 1, d, h, mi); };
+  return Math.round((ms(A) - ms(B)) / 60000);
+}
+
 const DOW = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const DOW_KO = { sun: '일', mon: '월', tue: '화', wed: '수', thu: '목', fri: '금', sat: '토' };
+const DOW_ORDER = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+/** ['tue','thu','sat'] → '화·목·토' (월요일부터) */
+export function daysKo(days) {
+  if (!Array.isArray(days) || !days.length) return '';
+  const set = new Set(days.map(d => String(d).toLowerCase().slice(0, 3)));
+  if (set.size === 7) return '매일';
+  return DOW_ORDER.filter(d => set.has(d)).map(d => DOW_KO[d]).join('·');
+}
+
+/** '2026-11-14' → '2026-11-14(토)' */
+export function dateWithDow(dateKey) {
+  return dateKey ? `${dateKey}(${DOW_KO[DOW[weekdayOfKey(dateKey)]]})` : '';
+}
 
 /**
  * Routes API 응답 → 그 편의 정기 시각. 그 날짜 요일에 운항하는 항목을 우선.
- * @returns {{error?:object, dep, arr, std, sta, days:string[], operatesThatDay:boolean}}
+ *  v2.3.1: 같은 편의 다른 요일 시각표(variants)도 함께 — 다른 날짜를 볼 때 요일에 맞는 것을 고르기 위해
+ * @returns {{error?:object, dep, arr, std, sta, days:string[], operatesThatDay:boolean, variants:{dep,arr,std,sta,days}[]}}
  */
 export function parseAirlabsRoutes(json, iata, dateKey) {
   if (!json || typeof json !== 'object') return { error: { code: 'internal_error' } };
@@ -121,14 +151,24 @@ export function parseAirlabsRoutes(json, iata, dateKey) {
   const list = Array.isArray(json.response) ? json.response : (Array.isArray(json) ? json : []);
   const mine = list.filter(x => x && String(x.flight_iata || '').toUpperCase() === String(iata).toUpperCase());
   if (!mine.length) return { error: { code: 'not_found' } };
+  const hhmm = v => (/^\d{2}:\d{2}$/.test(v || '') ? v : '');
+  const variants = mine.slice(0, 6).map(x => ({ dep: x.dep_iata || '', arr: x.arr_iata || '', std: hhmm(x.dep_time), sta: hhmm(x.arr_time), days: Array.isArray(x.days) ? x.days : [] }));
+  const v = pickRouteVariant({ ...variants[0], variants }, dateKey);
+  return { ...v, variants, operatesThatDay: v.operatesThatDay };
+}
+
+/** 캐시된 정기 노선(airlabs) 중 그 날짜 요일에 맞는 것 → { dep, arr, std, sta, days, operatesThatDay, dow } */
+export function pickRouteVariant(route, dateKey) {
+  if (!route) return null;
+  const list = Array.isArray(route.variants) && route.variants.length ? route.variants : [route];
   const dow = dateKey ? DOW[weekdayOfKey(dateKey)] : '';
-  const best = mine.find(x => Array.isArray(x.days) && x.days.includes(dow)) || mine[0];
+  const best = list.find(x => Array.isArray(x.days) && x.days.includes(dow)) || list[0];
+  const allDays = [...new Set(list.flatMap(x => (Array.isArray(x.days) ? x.days : [])))];
   return {
-    dep: best.dep_iata || '', arr: best.arr_iata || '',
-    std: /^\d{2}:\d{2}$/.test(best.dep_time || '') ? best.dep_time : '',
-    sta: /^\d{2}:\d{2}$/.test(best.arr_time || '') ? best.arr_time : '',
-    days: Array.isArray(best.days) ? best.days : [],
-    operatesThatDay: Boolean(dow && Array.isArray(best.days) && best.days.includes(dow))
+    dep: best.dep || '', arr: best.arr || '', std: best.std || '', sta: best.sta || '',
+    days: Array.isArray(best.days) ? best.days : [], allDays,
+    operatesThatDay: Boolean(dow && Array.isArray(best.days) && best.days.includes(dow)),
+    knownDays: allDays.length > 0, dow
   };
 }
 

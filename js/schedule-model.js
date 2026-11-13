@@ -89,13 +89,24 @@ export function stripManual(v) {
   return rest;
 }
 
+/** 비교용 정규화: 배열 → {"0":…}(Firebase 가 돌려주는 모양), 키 정렬, 빈 값 제거 (v2.3.1 gf.flights) */
+function canonValue(x) {
+  if (Array.isArray(x)) { const o = {}; x.forEach((v, i) => { const c = canonValue(v); if (c !== null) o[String(i)] = c; }); return Object.keys(o).length ? o : null; }
+  if (x && typeof x === 'object') {
+    const o = {};
+    for (const k of Object.keys(x).sort()) { const c = canonValue(x[k]); if (c !== null && c !== '' && c !== undefined) o[k] = c; }
+    return Object.keys(o).length ? o : null;
+  }
+  return x === undefined ? null : x;
+}
+
 /** 비교용 핵심 내용: 표시 필드·빈 값('' / false / null) 제거 */
 export function dutyCore(v) {
   if (!v || typeof v !== 'object') return null;
   const o = {};
   for (const k of Object.keys(v).sort()) {
     if (FLAG_FIELDS.includes(k)) continue;
-    const x = v[k];
+    const x = v[k] && typeof v[k] === 'object' ? canonValue(v[k]) : v[k];
     if (x === '' || x === false || x === null || x === undefined) continue;
     o[k] = x;
   }

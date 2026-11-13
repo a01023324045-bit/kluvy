@@ -6,6 +6,7 @@
 import { weekdayOfKey } from '../dates.js';
 import { stayKstInfo } from '../timezone.js';
 import { isFlightDuty } from './flight-card.js';
+import { gfFlights, flightLabel, flightFieldsFromInputs } from '../flight.js';
 import { mapGeminiItem } from '../parsers/gemini-yejin.js';
 import { parseKyuhoShiftRule } from '../parsers/excel-kyuho.js';
 import { STATUS_LABEL, CHECK_MEANING, describeDuty, summarizeRows, isBlankDuty } from '../upload-merge.js';
@@ -19,7 +20,14 @@ export function finalizePreviewRow(row, edits = {}) {
   const start = edits.start !== undefined ? String(edits.start).trim() : undefined;
   const end = edits.end !== undefined ? String(edits.end).trim() : undefined;
   const dest = edits.destination !== undefined ? String(edits.destination).trim() : undefined;
-  const flight = edits.flight !== undefined ? String(edits.flight).trim().replace(/\s+/g, ' ').toUpperCase() : undefined;
+  // v2.3.1: 편명은 가는 편(flight)·오는 편(flight2) 두 칸 → { flight, flights }
+  const flightEdited = edits.flight !== undefined || edits.flight2 !== undefined;
+  const legs0 = gfFlights(row.value);
+  const fl = flightEdited ? flightFieldsFromInputs({
+    f1: edits.flight !== undefined ? edits.flight : (legs0[0] ? flightLabel(legs0[0]) : String(row.value.flight || '')),
+    f2: edits.flight2 !== undefined ? edits.flight2 : (legs0[1] ? flightLabel(legs0[1]) : '')
+  }) : null;
+  const flight = fl ? fl.flight : undefined;
   const typeChanged = type !== undefined && type !== String(row.value.type || '');
   if (row.who === 'my') {
     let v = typeChanged ? parseKyuhoShiftRule(type, row.dateKey) : { ...row.value };
@@ -28,13 +36,18 @@ export function finalizePreviewRow(row, edits = {}) {
     return v;
   }
   if (typeChanged) {
-    return mapGeminiItem({ ...row.raw, type, start: start ?? row.value.start ?? '', end: end ?? row.value.end ?? '', destination: dest ?? row.value.destination ?? '', flight: flight ?? row.value.flight ?? '' });
+    const m = mapGeminiItem({ ...row.raw, type, start: start ?? row.value.start ?? '', end: end ?? row.value.end ?? '', destination: dest ?? row.value.destination ?? '', flight: flight ?? row.value.flight ?? '' });
+    if (fl && 'flight' in m) { m.flight = fl.flight; if (fl.flights) m.flights = fl.flights; else delete m.flights; }
+    return m;
   }
   const v = { ...row.value };
   if (start !== undefined) v.start = start;
   if (end !== undefined) v.end = end;
   if (dest !== undefined && 'destination' in row.value) v.destination = dest;
-  if (flight !== undefined && flight !== String(row.value.flight || '')) v.flight = flight; // v2.3.0: 편명 직접 입력·수정
+  if (fl) { // v2.3.0: 편명 직접 입력·수정 (v2.3.1: 가는 편·오는 편)
+    v.flight = fl.flight;
+    if (fl.flights) v.flights = fl.flights; else delete v.flights;
+  }
   if ((start !== undefined || end !== undefined) && v.timesFrom) delete v.timesFrom; // 직접 고쳤으면 시간표 표시 해제
   return v;
 }
@@ -160,9 +173,13 @@ export function openRecognizePreview(opts) {
     }
     if (row.who === 'gf' && isFlightDuty(row.value)) {
       // v2.3.0: 사진에서 편명이 빠졌으면 여기서 직접 넣기 (예: TW405 또는 TW501 ICN-SYD)
-      const flIn = input('pv-flight pv-input', row.value.flight || '', { placeholder: '편명', autocapitalize: 'characters', 'aria-label': '편명' });
+      // v2.3.1: '721/806' = 가는 편 TW721 + 오는 편 TW806 → 두 칸으로 나눠 보여 주고 고칠 수 있게
+      const legs = gfFlights(row.value);
+      const flIn = input('pv-flight pv-input', legs[0] ? flightLabel(legs[0]) : (row.value.flight || ''), { placeholder: '가는 편', autocapitalize: 'characters', 'aria-label': '편명 가는 편' });
+      const fl2In = input('pv-flight2 pv-input', legs[1] ? flightLabel(legs[1]) : '', { placeholder: '오는 편', autocapitalize: 'characters', 'aria-label': '편명 오는 편' });
       flIn.addEventListener('input', () => { row.edits.flight = flIn.value; touch(); });
-      edit.appendChild(flIn);
+      fl2In.addEventListener('input', () => { row.edits.flight2 = fl2In.value; touch(); });
+      edit.append(flIn, fl2In);
     }
     const sIn = input('pv-start pv-input pv-time', row.value.start, { placeholder: '--:--', inputmode: 'numeric', 'aria-label': '시작' });
     const eIn = input('pv-end pv-input pv-time', row.value.end, { placeholder: '--:--', inputmode: 'numeric', 'aria-label': '끝' });
