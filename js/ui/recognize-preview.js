@@ -179,14 +179,14 @@ export function openRecognizePreview(opts) {
     if (row.who === 'gf' && isFlightDuty(row.value)) {
       // v2.3.0: 사진에서 편명이 빠졌으면 여기서 직접 넣기 (예: TW405 또는 TW501 ICN-SYD)
       // v2.3.1: '721/806' = 가는 편 TW721 + 오는 편 TW806 → 두 칸으로 나눠 보여 주고 고칠 수 있게
-      // v2.4.0: 사진에서 읽은 편명을 레그마다 한 칸씩 (최대 4칸, 3개 이상이면 3칸) + '전체 N레그' 요약 + [+ 레그]
+      // v2.4.0: 사진에서 읽은 편명을 레그마다 한 칸씩 (최대 4칸, 3개 이상이면 3칸) + '전체 N레그 · TW721 · TW806' 요약
+      // v2.4.1: [+ 레그] 없음 — 칸 수는 (읽은 레그 수, 최소 2). 모자라게 읽었으면 첫 칸에 '241/242/243' 처럼 적으면 레그별로 나뉜다.
       const legs = gfFlights(row.value);
       const shown = previewLegSlots(legs.length);
       const legsBox = el('div', 'pv-legs');
       const ins = [];
       const nameOf = (i, n) => (n <= 2 ? ['가는 편', '오는 편'][i] : `${i + 1}레그`);
       const sum = el('div', 'pv-legsum');
-      let addBtn = null;
       const refreshSum = () => {
         const f = flightFieldsFromInputs({ f1: ins[0] ? ins[0].value : '', f2: ins[1] ? ins[1].value : '', f3: ins[2] ? ins[2].value : '', f4: ins[3] ? ins[3].value : '' });
         const list = f.flights ? f.flights.map(l => l.no) : (f.flight ? [String(f.flight).split(' ')[0]] : []);
@@ -200,15 +200,9 @@ export function openRecognizePreview(opts) {
         const key = i === 0 ? 'flight' : `flight${i + 1}`;
         inp.addEventListener('input', () => { row.edits[key] = inp.value; touch(); refreshSum(); });
         ins.push(inp);
-        legsBox.insertBefore(inp, addBtn);
+        legsBox.appendChild(inp);
       };
       for (let i = 0; i < shown; i++) addIn(i);
-      addBtn = el('button', 'pv-leg-add', '+ 레그');
-      addBtn.type = 'button';
-      addBtn.setAttribute('aria-label', '레그 칸 추가');
-      addBtn.addEventListener('click', () => { addIn(ins.length); if (ins.length >= MAX_LEGS) addBtn.classList.add('hidden'); ins[ins.length - 1].focus(); });
-      if (shown >= MAX_LEGS) addBtn.classList.add('hidden');
-      legsBox.appendChild(addBtn);
       refreshSum();
       legsBlock = el('div', 'pv-legs-wrap');
       legsBlock.append(legsBox, sum);

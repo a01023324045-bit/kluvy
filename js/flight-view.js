@@ -153,9 +153,9 @@ export function routeCacheKey(iata) {
   return `flightTimes/${iata}/airlabs`;
 }
 
-/** 조회 버튼 글자: 한 레그면 '예정/실제 시각 불러오기', 여러 레그면 '2레그 예정/실제 시각 불러오기' */
+/** 조회 버튼 글자(v2.4.1): 한 레그면 '비행정보 확인', 여러 레그면 '2레그 비행정보 확인' */
 export function lookupButtonText(i, n) {
-  return n > 1 ? `${i + 1}레그 예정/실제 시각 불러오기` : '예정/실제 시각 불러오기';
+  return n > 1 ? `${i + 1}레그 비행정보 확인` : '비행정보 확인';
 }
 
 /**

@@ -1,6 +1,8 @@
 // 상세 카드의 '✈️ 비행 정보' 상자 — 편명 정규화·실시간 보기 링크·이륙/착륙(현지+KST)·AirLabs 조회 버튼
 // v2.4.0: 하루에 레그(편)가 2개 이상(왕복 721/806·퀵턴 241/242/243/244)이면 상단에 레그 칩(1 TW721 · 2 TW806 …)을 두고
-//         고른 레그 하나만 자세히 보여 준다(시각·출처·AirLabs 참고·실시간 링크·[N레그 예정/실제 시각 불러오기]).
+//         고른 레그 하나만 자세히 보여 준다(시각·출처·AirLabs 참고·실시간 링크·[N레그 비행정보 확인]).
+// v2.4.1: 칩은 레그가 2개 이상이면 항상 기본으로 보인다(따로 누를 필요 없음). 조회 버튼 = [비행정보 확인] / [2레그 비행정보 확인],
+//         결과·오류는 고른 레그 아래에. 편명이 빈 비행 날은 '근무표 사진을 다시 등록하면 자동으로 채워집니다' + [사진 다시 등록].
 //         기본은 1레그, 선택은 같은 날짜를 보고 있는 동안만 유지(다른 날짜로 갔다 오면 1레그). AirLabs 는 고른 레그만 조회(한도 절약).
 //         크게 보이는 시각은 flight-view.js pickLegTimes (직접 입력 > 근무표 > 실제 > 예상 > 시간표 > 정기),
 //         AirLabs 는 정기·예상·실제·지연 라벨을 붙인 요약 한 줄 + 운항 날짜·구간 한 줄 + 안내 한 줄.
@@ -35,6 +37,29 @@ function openEditForFlight(focusId = 'inputGfFlight') {
   setTimeout(() => {
     const inp = document.getElementById(focusId) || document.getElementById('inputGfFlight');
     if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
+  }, 50);
+}
+
+/** [사진 다시 등록] → 그 날짜가 속한 달의 등록 창을 열고 '이예진 스케줄 사진' 칸으로 */
+function openUploadForRephoto(dateKey) {
+  const w = typeof window !== 'undefined' ? window : null;
+  if (!w || !w.openUploadModalForCurrentMonth) return;
+  w.openUploadModalForCurrentMonth();
+  const y = document.getElementById('selectUploadYear');
+  const m = document.getElementById('selectUploadMonth');
+  if (y && m && dateKey && (Number(y.value) !== Number(dateKey.slice(0, 4)) || Number(m.value) !== Number(dateKey.slice(5, 7)))) {
+    y.value = String(Number(dateKey.slice(0, 4)));
+    m.value = String(Number(dateKey.slice(5, 7)));
+    if (w.onMonthSelectorChange) w.onMonthSelectorChange();
+  }
+  setTimeout(() => {
+    const f = document.getElementById('yejinImageFile');
+    if (!f) return;
+    const sec = f.closest('.section') || f;
+    sec.scrollIntoView({ block: 'center' });
+    sec.classList.add('is-hint');
+    setTimeout(() => sec.classList.remove('is-hint'), 2400);
+    f.focus({ preventScroll: true });
   }, 50);
 }
 
@@ -150,14 +175,19 @@ export function renderFlightBox(box, dateKey, gf) {
       wrap.appendChild(el('div', 'fl-title', '✈️ 비행 정보'));
       const m = el('div', 'fl-msg', gf.flight
         ? `편명 '${gf.flight}' 을(를) 알아볼 수 없어 예정 시각을 볼 수 없습니다 — 편집창에서 편명을 TW405 처럼 넣으면 AirLabs/편명 시간표로 이륙·착륙 시각을 볼 수 있습니다.`
-        : '편명이 없어 예정 시각을 볼 수 없습니다 — [편명 입력]으로 이 날만 넣거나, 근무표 사진을 다시 등록하면 사진에서 편명을 자동으로 채웁니다.');
+        : '이 날 편명이 비어 있습니다 — 근무표 사진을 다시 등록하면 편명이 자동으로 채워집니다.');
       m.id = 'flightNoNumber';
       wrap.appendChild(m);
       const links = el('div', 'fl-links');
-      const btn = el('button', 'fl-btn', '편명 입력');
+      const btn = el('button', gf.flight ? 'fl-btn' : 'fl-link fl-manual', '편명 입력');
       btn.type = 'button';
       btn.id = 'btnFlightNumberEdit';
       btn.addEventListener('click', () => openEditForFlight());
+      const photoBtn = el('button', 'fl-btn', '사진 다시 등록');
+      photoBtn.type = 'button';
+      photoBtn.id = 'btnFlightRephoto';
+      photoBtn.addEventListener('click', () => openUploadForRephoto(dateKey));
+      if (!gf.flight) links.appendChild(photoBtn);
       links.appendChild(btn);
       wrap.appendChild(links);
       box.appendChild(wrap);

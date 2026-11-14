@@ -241,6 +241,7 @@ input[type="text"], input[type="email"], input[type="password"], input[type="tim
 .field:focus { outline: 2px solid #a5b4fc; outline-offset: 0; border-color: var(--kv-select); }
 textarea.field { height: auto; padding: 8px 10px; line-height: 1.45; }
 .section { border: 1px solid var(--kv-line); border-radius: 16px; padding: 14px; background: #fff; }
+.section.is-hint { outline: 3px solid #fda4af; outline-offset: 2px; transition: outline-color .3s; }
 .section-title { font-size: 15px; font-weight: var(--kv-w-title); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
 .help { font-size: 12px; color: var(--kv-text-3); line-height: 1.5; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--kv-touch); padding: 0 14px; border-radius: 12px; font-weight: var(--kv-w-strong); font-size: 15px; }
@@ -274,11 +275,8 @@ textarea.field { height: auto; padding: 8px 10px; line-height: 1.45; }
 /* v2.4.0 편집창 레그 칸 */
 .leg-block { border: 1px solid var(--kv-line); border-radius: 10px; padding: 8px; background: #f8fafc; }
 .leg-block .leg-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: var(--kv-w-strong); color: var(--kv-text-2); margin-bottom: 4px; }
-.leg-remove { min-height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid #fecdd3; background: #fff; color: #be123c; font-size: 12px; font-weight: var(--kv-w-strong); }
-.leg-add { min-height: 44px; width: 100%; border-radius: 10px; border: 1px dashed #7dd3fc; background: #f0f9ff; color: #075985; font-size: 14px; font-weight: var(--kv-w-strong); }
 
 /* v2.4.0 미리보기 레그별 편명 칸 (최대 4) */
 .pv-legs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
-.pv-leg-add { height: 40px; padding: 0 12px; border-radius: 8px; border: 1px dashed #7dd3fc; background: #f0f9ff; color: #075985; font-size: 13px; font-weight: var(--kv-w-strong); }
 .pv-legsum { font-size: 12px; font-weight: var(--kv-w-strong); color: var(--kv-text-3); margin-top: 4px; }
 .pv-legsum.is-multi { color: #075985; }

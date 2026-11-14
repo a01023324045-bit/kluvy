@@ -8,6 +8,7 @@ import { learnFlightFromGf } from '../flight-times.js';
 import { gfFlights, flightLabel, flightFieldsFromInputs, MAX_LEGS } from '../flight.js';
 
 // v2.4.0: 레그(편)마다 편명·이륙·착륙 칸 (최대 4레그). 1레그 = inputGfFlight, N레그 = inputGfFlight{N}
+// v2.4.1: [+ 레그 추가]·[삭제] 없음 — 칸 수는 (인식·저장된 레그 수, 최소 2). 빈 칸은 저장에서 빠진다(flightFieldsFromInputs).
 const LEG_NUMS = Array.from({ length: MAX_LEGS }, (_, i) => i + 1);
 const flightId = n => (n === 1 ? 'inputGfFlight' : `inputGfFlight${n}`);
 const stdId = n => `inputGfFl${n}Std`;
@@ -165,45 +166,20 @@ export function openEditModal(dateKey = state.selectedDateKey) {
   document.getElementById('editModal').classList.remove('hidden');
 }
 
-/** 보이는 레그 칸 수 (2~4): 1·2레그는 항상, 3·4레그는 편명이 있거나 [+ 레그 추가]를 눌렀을 때 */
+/**
+ * 보이는 레그 칸 수 = (인식·저장된 레그 수, 최소 2) — v2.4.1: 늘리거나 줄이는 버튼은 없다.
+ * 1·2칸 = 기존 v2.3.x 의 '가는 편/오는 편'(오인식 수정용), 3·4칸은 3~4레그 데이터가 있을 때만 보인다.
+ */
 function showLegBlocks(count) {
   const n = Math.min(MAX_LEGS, Math.max(2, count));
   for (const k of LEG_NUMS) {
     const b = document.getElementById(`gfLeg${k}`);
     if (b) b.classList.toggle('hidden', k > n);
   }
-  const add = document.getElementById('btnLegAdd');
-  if (add) add.classList.toggle('hidden', n >= MAX_LEGS);
-}
-function visibleLegCount() {
-  return LEG_NUMS.filter(k => { const b = document.getElementById(`gfLeg${k}`); return b && !b.classList.contains('hidden'); }).length;
-}
-
-/** [+ 레그 추가] · [삭제] 버튼 연결 (창을 열 때마다 다시 연결해도 안전) */
-function bindLegButtons() {
-  const add = document.getElementById('btnLegAdd');
-  if (add) add.onclick = () => {
-    const n = Math.min(MAX_LEGS, visibleLegCount() + 1);
-    showLegBlocks(n);
-    const f = document.getElementById(flightId(n));
-    if (f) { f.scrollIntoView({ block: 'center' }); f.focus(); }
-  };
-  for (const k of [3, 4]) {
-    const rm = document.getElementById(`btnLegRemove${k}`);
-    if (rm) rm.onclick = () => {
-      // k 번째 레그를 지우고 뒤 레그를 한 칸씩 앞으로
-      const vals = LEG_NUMS.map(n => [flightId(n), stdId(n), staId(n)].map(id => ((document.getElementById(id) || {}).value || '')));
-      vals.splice(k - 1, 1);
-      vals.push(['', '', '']);
-      LEG_NUMS.forEach((n, i) => [flightId(n), stdId(n), staId(n)].forEach((id, j) => setVal(id, vals[i][j])));
-      showLegBlocks(visibleLegCount() - 1);
-    };
-  }
 }
 
 /** v2.4.0: 레그별 편명 칸과 편별 이륙·착륙(직접 입력) 칸 채우기 (v2.3.1 의 가는 편·오는 편 = 1·2레그) */
 function fillFlightInputs(gf) {
-  bindLegButtons();
   const legs = gfFlights(gf);
   for (const id of FLIGHT_INPUTS) setVal(id, '');
   if (!legs.length) {
