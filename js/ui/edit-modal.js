@@ -5,9 +5,14 @@ import { applyEditToDates, defaultTimesFor, GF_DEFAULT_TIMES, KYUHO_SHIFTS, KYUH
 import { saveDB } from '../firebase-sync.js';
 import { renderCalendar } from '../render/calendar.js';
 import { learnFlightFromGf } from '../flight-times.js';
-import { gfFlights, flightLabel, flightFieldsFromInputs } from '../flight.js';
+import { gfFlights, flightLabel, flightFieldsFromInputs, MAX_LEGS } from '../flight.js';
 
-const FLIGHT_INPUTS = ['inputGfFlight', 'inputGfFlight2', 'inputGfFl1Std', 'inputGfFl1Sta', 'inputGfFl2Std', 'inputGfFl2Sta'];
+// v2.4.0: 레그(편)마다 편명·이륙·착륙 칸 (최대 4레그). 1레그 = inputGfFlight, N레그 = inputGfFlight{N}
+const LEG_NUMS = Array.from({ length: MAX_LEGS }, (_, i) => i + 1);
+const flightId = n => (n === 1 ? 'inputGfFlight' : `inputGfFlight${n}`);
+const stdId = n => `inputGfFl${n}Std`;
+const staId = n => `inputGfFl${n}Sta`;
+const FLIGHT_INPUTS = [...LEG_NUMS.map(flightId), ...LEG_NUMS.flatMap(n => [stdId(n), staId(n)])];
 
 /** 편집창 규호 근무 목록 (select 의 option 과 같게 유지) */
 export const PREDEFINED_MY = ["조근", "공휴일조근", "석근", "공휴일석근", "석5", "공휴일석5", "석1", "일근", "O", "대휴", "휴가", "연차", "TS-3", "TS-1", "연수"];
@@ -160,22 +165,60 @@ export function openEditModal(dateKey = state.selectedDateKey) {
   document.getElementById('editModal').classList.remove('hidden');
 }
 
-/** v2.3.1: 편명 칸(가는 편·오는 편)과 편별 이륙·착륙(직접 입력) 칸 채우기 */
+/** 보이는 레그 칸 수 (2~4): 1·2레그는 항상, 3·4레그는 편명이 있거나 [+ 레그 추가]를 눌렀을 때 */
+function showLegBlocks(count) {
+  const n = Math.min(MAX_LEGS, Math.max(2, count));
+  for (const k of LEG_NUMS) {
+    const b = document.getElementById(`gfLeg${k}`);
+    if (b) b.classList.toggle('hidden', k > n);
+  }
+  const add = document.getElementById('btnLegAdd');
+  if (add) add.classList.toggle('hidden', n >= MAX_LEGS);
+}
+function visibleLegCount() {
+  return LEG_NUMS.filter(k => { const b = document.getElementById(`gfLeg${k}`); return b && !b.classList.contains('hidden'); }).length;
+}
+
+/** [+ 레그 추가] · [삭제] 버튼 연결 (창을 열 때마다 다시 연결해도 안전) */
+function bindLegButtons() {
+  const add = document.getElementById('btnLegAdd');
+  if (add) add.onclick = () => {
+    const n = Math.min(MAX_LEGS, visibleLegCount() + 1);
+    showLegBlocks(n);
+    const f = document.getElementById(flightId(n));
+    if (f) { f.scrollIntoView({ block: 'center' }); f.focus(); }
+  };
+  for (const k of [3, 4]) {
+    const rm = document.getElementById(`btnLegRemove${k}`);
+    if (rm) rm.onclick = () => {
+      // k 번째 레그를 지우고 뒤 레그를 한 칸씩 앞으로
+      const vals = LEG_NUMS.map(n => [flightId(n), stdId(n), staId(n)].map(id => ((document.getElementById(id) || {}).value || '')));
+      vals.splice(k - 1, 1);
+      vals.push(['', '', '']);
+      LEG_NUMS.forEach((n, i) => [flightId(n), stdId(n), staId(n)].forEach((id, j) => setVal(id, vals[i][j])));
+      showLegBlocks(visibleLegCount() - 1);
+    };
+  }
+}
+
+/** v2.4.0: 레그별 편명 칸과 편별 이륙·착륙(직접 입력) 칸 채우기 (v2.3.1 의 가는 편·오는 편 = 1·2레그) */
 function fillFlightInputs(gf) {
+  bindLegButtons();
   const legs = gfFlights(gf);
+  for (const id of FLIGHT_INPUTS) setVal(id, '');
   if (!legs.length) {
     // 알아볼 수 없는 편명 글자는 그대로 보여 줌 (지우지 않게)
     setVal('inputGfFlight', gf && gf.flight ? gf.flight : '');
-    for (const id of FLIGHT_INPUTS.slice(1)) setVal(id, '');
+    showLegBlocks(2);
     return;
   }
-  const l1 = legs[0], l2 = legs[1];
-  setVal('inputGfFlight', flightLabel(l1));
-  setVal('inputGfFlight2', l2 ? flightLabel(l2) : '');
-  setVal('inputGfFl1Std', l1.source === 'manual' ? l1.std : '');
-  setVal('inputGfFl1Sta', l1.source === 'manual' ? l1.sta : '');
-  setVal('inputGfFl2Std', l2 && l2.source === 'manual' ? l2.std : '');
-  setVal('inputGfFl2Sta', l2 && l2.source === 'manual' ? l2.sta : '');
+  legs.slice(0, MAX_LEGS).forEach((L, i) => {
+    const n = i + 1;
+    setVal(flightId(n), flightLabel(L));
+    setVal(stdId(n), L.source === 'manual' ? L.std : '');
+    setVal(staId(n), L.source === 'manual' ? L.sta : '');
+  });
+  showLegBlocks(legs.length);
 }
 
 export function closeEditModal() {
@@ -238,8 +281,11 @@ export function saveModalChanges() {
   // 편명 (v2.3.0): 적었으면 저장. 단일 수정에서 원래 있던 편명을 지웠으면 '' 로 지움.
   // 비워 둔 일괄 수정은 키를 안 넣어 기존 편명(같은 근무 형태일 때)을 그대로 둠 (mergeGf)
   // v2.3.1: 가는 편·오는 편 + 편별 이륙/착륙 직접 입력 → gf.flight(가는 편, v2.3.0 호환) + gf.flights([가는 편, 오는 편])
+  // v2.4.0: 레그 최대 4개 → gf.flights 배열 길이 4까지
   const val = id => ((document.getElementById(id) || {}).value || '').trim();
-  const fl = flightFieldsFromInputs({ f1: val('inputGfFlight'), f2: val('inputGfFlight2'), s1: val('inputGfFl1Std'), a1: val('inputGfFl1Sta'), s2: val('inputGfFl2Std'), a2: val('inputGfFl2Sta') });
+  const legVals = {};
+  for (const n of LEG_NUMS) Object.assign(legVals, { [`f${n}`]: val(flightId(n)), [`s${n}`]: val(stdId(n)), [`a${n}`]: val(staId(n)) });
+  const fl = flightFieldsFromInputs(legVals);
   const prevGf = (state.scheduleDB[state.selectedDateKey] || {}).gf;
   const noFlightType = gfFinalType === 'OFF' || /^(SBY|IS[A-D]|GS[A-D])$/.test(gfFinalType);
   if (noFlightType) { /* 비행 아닌 근무: 편명 없음 */ }

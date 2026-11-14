@@ -346,38 +346,85 @@
             <label class="field-label" for="inputGfDestination">도착지 / 도시명</label>
             <input type="text" id="inputGfDestination" placeholder="예: 오사카, 다낭, 비슈케크, 부산" class="field font-semibold" />
           </div>
-          <div id="gfFlightFields" class="space-y-1.5">
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="field-label" for="inputGfFlight">편명 · 가는 편</label>
-                <input type="text" id="inputGfFlight" placeholder="예: TW721 · 721/806" autocapitalize="characters" autocomplete="off" spellcheck="false" class="field" />
-              </div>
-              <div>
-                <label class="field-label" for="inputGfFlight2">오는 편 (왕복)</label>
-                <input type="text" id="inputGfFlight2" placeholder="예: TW806" autocapitalize="characters" autocomplete="off" spellcheck="false" class="field" />
-              </div>
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="field-label" for="inputGfFl1Std">가는 편 이륙 (현지)</label>
-                <input type="time" id="inputGfFl1Std" class="field" />
-              </div>
-              <div>
-                <label class="field-label" for="inputGfFl1Sta">가는 편 착륙 (현지)</label>
-                <input type="time" id="inputGfFl1Sta" class="field" />
-              </div>
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="field-label" for="inputGfFl2Std">오는 편 이륙 (현지)</label>
-                <input type="time" id="inputGfFl2Std" class="field" />
-              </div>
-              <div>
-                <label class="field-label" for="inputGfFl2Sta">오는 편 착륙 (현지)</label>
-                <input type="time" id="inputGfFl2Sta" class="field" />
+          <div id="gfFlightFields" class="space-y-2">
+            <div id="gfLeg1" class="leg-block" data-leg="1">
+              <div class="leg-head"><span>1레그</span></div>
+              <div class="space-y-1.5">
+                <div>
+                  <label class="sr-only" for="inputGfFlight">편명</label>
+                  <input type="text" id="inputGfFlight" placeholder="예: TW721 · 721/806 · 241/242/243" autocapitalize="characters" autocomplete="off" spellcheck="false" class="field" />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="field-label" for="inputGfFl1Std">이륙 (현지)</label>
+                    <input type="time" id="inputGfFl1Std" class="field" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="inputGfFl1Sta">착륙 (현지)</label>
+                    <input type="time" id="inputGfFl1Sta" class="field" />
+                  </div>
+                </div>
               </div>
             </div>
-            <p class="help"><b>721/806</b> 처럼 넣어도 가는 편·오는 편으로 나눕니다. 이륙·착륙은 알 때만 — 넣으면 AirLabs보다 먼저 보입니다.</p>
+            <div id="gfLeg2" class="leg-block" data-leg="2">
+              <div class="leg-head"><span>2레그</span></div>
+              <div class="space-y-1.5">
+                <div>
+                  <label class="sr-only" for="inputGfFlight2">편명</label>
+                  <input type="text" id="inputGfFlight2" placeholder="예: TW806" autocapitalize="characters" autocomplete="off" spellcheck="false" class="field" />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="field-label" for="inputGfFl2Std">이륙 (현지)</label>
+                    <input type="time" id="inputGfFl2Std" class="field" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="inputGfFl2Sta">착륙 (현지)</label>
+                    <input type="time" id="inputGfFl2Sta" class="field" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="gfLeg3" class="leg-block hidden" data-leg="3">
+              <div class="leg-head"><span>3레그</span><button type="button" class="leg-remove" id="btnLegRemove3" data-leg="3">삭제</button></div>
+              <div class="space-y-1.5">
+                <div>
+                  <label class="sr-only" for="inputGfFlight3">편명</label>
+                  <input type="text" id="inputGfFlight3" placeholder="예: TW806" autocapitalize="characters" autocomplete="off" spellcheck="false" class="field" />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="field-label" for="inputGfFl3Std">이륙 (현지)</label>
+                    <input type="time" id="inputGfFl3Std" class="field" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="inputGfFl3Sta">착륙 (현지)</label>
+                    <input type="time" id="inputGfFl3Sta" class="field" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="gfLeg4" class="leg-block hidden" data-leg="4">
+              <div class="leg-head"><span>4레그</span><button type="button" class="leg-remove" id="btnLegRemove4" data-leg="4">삭제</button></div>
+              <div class="space-y-1.5">
+                <div>
+                  <label class="sr-only" for="inputGfFlight4">편명</label>
+                  <input type="text" id="inputGfFlight4" placeholder="예: TW806" autocapitalize="characters" autocomplete="off" spellcheck="false" class="field" />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="field-label" for="inputGfFl4Std">이륙 (현지)</label>
+                    <input type="time" id="inputGfFl4Std" class="field" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="inputGfFl4Sta">착륙 (현지)</label>
+                    <input type="time" id="inputGfFl4Sta" class="field" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button type="button" id="btnLegAdd" class="leg-add">+ 레그 추가 (최대 4)</button>
+            <p class="help"><b>721/806</b> 처럼 첫 칸에 넣어도 레그별로 나눕니다(<b>241/242/243</b> → 3레그). 이륙·착륙은 알 때만 — 넣으면 AirLabs보다 먼저 보입니다.</p>
           </div>
           <div id="wrapGfCustomShift" class="hidden">
             <label class="field-label text-rose-700" for="inputGfShiftCustom">예진 직접입력 근무명</label>

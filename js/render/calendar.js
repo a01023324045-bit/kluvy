@@ -10,11 +10,12 @@ import { BASE_LOVE_DATE } from '../config.js';
 import { state } from '../state.js';
 import { getKSTDate, getDiffDays, makeDateKey, parseDateKey } from '../dates.js';
 import { HOLIDAYS } from '../holidays.js';
-import { stayKstInfo, kstDiffText, KST_UNKNOWN } from '../timezone.js';
+import { stayKstInfo } from '../timezone.js';
 import { calculateBarPosition, kyuhoKind, gfKind } from '../schedule-model.js';
 import { getAnniversaryInfo } from '../anniversary.js';
 import { renderFlightBox } from '../ui/flight-card.js';
 import { flightsText } from '../flight.js';
+import { detailTitleParts, cellTooltip } from '../title-format.js';
 
 // 4글자 이상(예: 비슈케크·타이베이)은 좁은 칸에서 '…'으로 잘리지 않게 자간·여백을 줄인다 (app.css .duty--long)
 function longLabelClass(label) {
@@ -129,24 +130,22 @@ export function updateDetailCard() {
     const g = dayData.gf;
     const dest = g ? (g.destination || "") : "";
 
-    if (g && g.start && g.end) {
-      setBar(gfBar, g.start, g.end, dest || g.type, g.isQuickTurn ? '#0e7490' : 'var(--kv-yejin)');
-      let desc = `${dest ? '✈️ ' + dest + ' ' : ''}${!dest ? g.type + ' ' : ''}(${g.start} ~ ${g.end})`;
-      const k = stayKstInfo(g, selectedDateKey); // 달력 칸과 같은 함수
-      if (k && k.status !== 'same') desc += ` [${k.kind === 'departure' ? '출발' : '도착'} KST: ${k.text}]`;
-      if (g.flight) desc += ` [${flightsText(g)}]`;
-      gfText.innerText = desc;
-    } else {
-      clearBar(gfBar);
-      gfText.innerText = g ? (g.isArrivalOnly ? `${dest} (도착일/체류)` : (g.isPureStay ? `${dest} (L/O 체류)` : (dest ? `${dest} (${g.type})` : `${g.type}`))) : '근무 없음';
+    // v2.4.0 제목 압축: 큰 글씨 1줄(✈️ 시드니 19:40→09:15 (+1일)) + 작은 글씨 1줄(TW501 · 현지 +2시간 · KR 07:15 도착)
+    if (g && g.start && g.end) setBar(gfBar, g.start, g.end, dest || g.type, g.isQuickTurn ? '#0e7490' : 'var(--kv-yejin)');
+    else clearBar(gfBar);
+    const tp = detailTitleParts(g, selectedDateKey);
+    gfText.textContent = '';
+    gfText.classList.toggle('detail-shift--title', tp.kind === 'times');
+    gfText.appendChild(el('div', 'dt-main', tp.main));
+    if (tp.sub) {
+      const sub = el('div', 'dt-sub', tp.sub);
+      if (tp.tip) sub.title = `현지는 ${tp.tip}`;
+      gfText.appendChild(sub);
     }
-    // 체류지 시차 안내 (출발·체류 중간·귀국일 모두) — 같은 장소 표(places.js)
-    if (g && dest && (g.type === '체류' || g.isPureStay || g.isArrivalOnly) && !g.isQuickTurn) {
-      const diff = kstDiffText(dest, selectedDateKey);
-      if (diff !== '한국과 같은 시각') gfText.appendChild(el('span', 'kst-diff', diff ? `🕒 현지는 ${diff}` : `🕒 ${dest}: 시간대 미등록 ${KST_UNKNOWN}`));
-    }
-    if (g && g.manual) gfText.appendChild(el('span', 'manual-tag', '✋ 직접 입력'));
-    if (g && g.timesFrom === 'flightTimes') gfText.appendChild(el('span', 'manual-tag', '🕒 편명 시간표'));
+    const tags = [];
+    if (g && g.manual) tags.push(el('span', 'manual-tag', '✋ 직접 입력'));
+    if (g && g.timesFrom === 'flightTimes') tags.push(el('span', 'manual-tag', '🕒 편명 시간표'));
+    if (tags.length) { const tg = el('div', 'dt-tags'); tg.append(...tags); gfText.appendChild(tg); }
   }
 
   const flightBox = document.getElementById('detailFlightBox');
@@ -197,7 +196,7 @@ function yejinDuty(g) {
   const yLabel = gfCellLabel(g);
   const d = el('div', `duty duty--y duty--${kind}${longLabelClass(yLabel)}`, yLabel);
   d.dataset.kind = `y-${kind}`;
-  d.title = `예진 ${g.destination ? g.destination + ' ' : ''}${g.type}${g.start ? ` ${g.start}~${g.end}` : ''}${g.flight ? ` ${flightsText(g)}` : ''}`;
+  d.title = cellTooltip(g, g.flight ? flightsText(g) : '');
   return d;
 }
 

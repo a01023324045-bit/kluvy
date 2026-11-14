@@ -6,7 +6,7 @@
 import { weekdayOfKey } from '../dates.js';
 import { stayKstInfo } from '../timezone.js';
 import { isFlightDuty } from './flight-card.js';
-import { gfFlights, flightLabel, flightFieldsFromInputs } from '../flight.js';
+import { gfFlights, flightLabel, flightFieldsFromInputs, MAX_LEGS } from '../flight.js';
 import { mapGeminiItem } from '../parsers/gemini-yejin.js';
 import { parseKyuhoShiftRule } from '../parsers/excel-kyuho.js';
 import { STATUS_LABEL, CHECK_MEANING, describeDuty, summarizeRows, isBlankDuty } from '../upload-merge.js';
@@ -14,19 +14,23 @@ import { STATUS_LABEL, CHECK_MEANING, describeDuty, summarizeRows, isBlankDuty }
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 let current = null; // { rows, onApply, onCancel, showSame }
 
+/** v2.4.0 미리보기 행의 편명 칸 수: 읽은 레그 수만큼(최소 2, 최대 MAX_LEGS=4) */
+export function previewLegSlots(legCount) {
+  return Math.min(MAX_LEGS, Math.max(2, Number(legCount) || 0));
+}
+
 /** 미리보기 행 + 사용자가 고친 값 → 저장할 값 (순수 함수, 테스트용) */
 export function finalizePreviewRow(row, edits = {}) {
   const type = edits.type !== undefined ? String(edits.type).trim() : undefined;
   const start = edits.start !== undefined ? String(edits.start).trim() : undefined;
   const end = edits.end !== undefined ? String(edits.end).trim() : undefined;
   const dest = edits.destination !== undefined ? String(edits.destination).trim() : undefined;
-  // v2.3.1: 편명은 가는 편(flight)·오는 편(flight2) 두 칸 → { flight, flights }
-  const flightEdited = edits.flight !== undefined || edits.flight2 !== undefined;
+  // v2.4.0: 편명은 레그별 칸 최대 4개 (flight·flight2·flight3·flight4) → { flight, flights }
+  const FL_KEYS = ['flight', 'flight2', 'flight3', 'flight4'];
+  const flightEdited = FL_KEYS.some(k => edits[k] !== undefined);
   const legs0 = gfFlights(row.value);
-  const fl = flightEdited ? flightFieldsFromInputs({
-    f1: edits.flight !== undefined ? edits.flight : (legs0[0] ? flightLabel(legs0[0]) : String(row.value.flight || '')),
-    f2: edits.flight2 !== undefined ? edits.flight2 : (legs0[1] ? flightLabel(legs0[1]) : '')
-  }) : null;
+  const fv = i => (edits[FL_KEYS[i]] !== undefined ? edits[FL_KEYS[i]] : (legs0[i] ? flightLabel(legs0[i]) : (i === 0 ? String(row.value.flight || '') : '')));
+  const fl = flightEdited ? flightFieldsFromInputs({ f1: fv(0), f2: fv(1), f3: fv(2), f4: fv(3) }) : null;
   const flight = fl ? fl.flight : undefined;
   const typeChanged = type !== undefined && type !== String(row.value.type || '');
   if (row.who === 'my') {
@@ -162,6 +166,7 @@ export function openRecognizePreview(opts) {
 
     // 2줄: 근무 · 도시 · 시간 (바로 고치기)
     const edit = el('div', 'pv-edit');
+    let legsBlock = null;
     const typeIn = input('pv-type pv-input', row.value.type, { list: row.who === 'my' ? 'previewMyTypes' : 'previewGfTypes', 'aria-label': '근무' });
     const touch = () => { if (!row.include) { row.include = true; chk.checked = true; tr.classList.remove('is-off'); updateCount(); } };
     typeIn.addEventListener('input', () => { row.edits.type = typeIn.value; touch(); });
@@ -174,12 +179,39 @@ export function openRecognizePreview(opts) {
     if (row.who === 'gf' && isFlightDuty(row.value)) {
       // v2.3.0: 사진에서 편명이 빠졌으면 여기서 직접 넣기 (예: TW405 또는 TW501 ICN-SYD)
       // v2.3.1: '721/806' = 가는 편 TW721 + 오는 편 TW806 → 두 칸으로 나눠 보여 주고 고칠 수 있게
+      // v2.4.0: 사진에서 읽은 편명을 레그마다 한 칸씩 (최대 4칸, 3개 이상이면 3칸) + '전체 N레그' 요약 + [+ 레그]
       const legs = gfFlights(row.value);
-      const flIn = input('pv-flight pv-input', legs[0] ? flightLabel(legs[0]) : (row.value.flight || ''), { placeholder: '가는 편', autocapitalize: 'characters', 'aria-label': '편명 가는 편' });
-      const fl2In = input('pv-flight2 pv-input', legs[1] ? flightLabel(legs[1]) : '', { placeholder: '오는 편', autocapitalize: 'characters', 'aria-label': '편명 오는 편' });
-      flIn.addEventListener('input', () => { row.edits.flight = flIn.value; touch(); });
-      fl2In.addEventListener('input', () => { row.edits.flight2 = fl2In.value; touch(); });
-      edit.append(flIn, fl2In);
+      const shown = previewLegSlots(legs.length);
+      const legsBox = el('div', 'pv-legs');
+      const ins = [];
+      const nameOf = (i, n) => (n <= 2 ? ['가는 편', '오는 편'][i] : `${i + 1}레그`);
+      const sum = el('div', 'pv-legsum');
+      let addBtn = null;
+      const refreshSum = () => {
+        const f = flightFieldsFromInputs({ f1: ins[0] ? ins[0].value : '', f2: ins[1] ? ins[1].value : '', f3: ins[2] ? ins[2].value : '', f4: ins[3] ? ins[3].value : '' });
+        const list = f.flights ? f.flights.map(l => l.no) : (f.flight ? [String(f.flight).split(' ')[0]] : []);
+        sum.textContent = list.length ? `전체 ${list.length}레그 · ${list.join(' · ')}` : '편명 없음';
+        sum.classList.toggle('is-multi', list.length > 1);
+      };
+      const addIn = i => {
+        const n = ins.length + 1;
+        const cls = i === 0 ? 'pv-flight' : `pv-flight${i + 1}`;
+        const inp = input(`${cls} pv-input`, legs[i] ? flightLabel(legs[i]) : (i === 0 ? (row.value.flight || '') : ''), { placeholder: nameOf(i, Math.max(n, shown)), autocapitalize: 'characters', 'aria-label': `편명 ${nameOf(i, Math.max(n, shown))}` });
+        const key = i === 0 ? 'flight' : `flight${i + 1}`;
+        inp.addEventListener('input', () => { row.edits[key] = inp.value; touch(); refreshSum(); });
+        ins.push(inp);
+        legsBox.insertBefore(inp, addBtn);
+      };
+      for (let i = 0; i < shown; i++) addIn(i);
+      addBtn = el('button', 'pv-leg-add', '+ 레그');
+      addBtn.type = 'button';
+      addBtn.setAttribute('aria-label', '레그 칸 추가');
+      addBtn.addEventListener('click', () => { addIn(ins.length); if (ins.length >= MAX_LEGS) addBtn.classList.add('hidden'); ins[ins.length - 1].focus(); });
+      if (shown >= MAX_LEGS) addBtn.classList.add('hidden');
+      legsBox.appendChild(addBtn);
+      refreshSum();
+      legsBlock = el('div', 'pv-legs-wrap');
+      legsBlock.append(legsBox, sum);
     }
     const sIn = input('pv-start pv-input pv-time', row.value.start, { placeholder: '--:--', inputmode: 'numeric', 'aria-label': '시작' });
     const eIn = input('pv-end pv-input pv-time', row.value.end, { placeholder: '--:--', inputmode: 'numeric', 'aria-label': '끝' });
@@ -189,6 +221,7 @@ export function openRecognizePreview(opts) {
     timeWrap.append(sIn, el('span', 'pv-tilde', '~'), eIn);
     edit.appendChild(timeWrap);
     td.appendChild(edit);
+    if (legsBlock) td.appendChild(legsBlock);
 
     // 예진 체류 비행: 한국시각 미리 보기 (달력 칸·상세 카드와 같은 함수 stayKstInfo) — 미등록 도시는 '(KR ?)'
     if (row.who === 'gf') {

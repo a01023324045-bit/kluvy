@@ -6,6 +6,9 @@
 import { localWallToUtc, tzOffsetMinutes } from './timezone.js';
 import { PLACES } from './places.js';
 
+/** v2.4.0: 하루에 저장·편집할 수 있는 최대 레그(편) 수 (퀵턴 왕복 2회 = 4레그) */
+export const MAX_LEGS = 4;
+
 export const HOME_AIRLINE = Object.freeze({ iata: 'TW', icao: 'TWB', name: '트리니티항공', oldName: '티웨이항공' });
 
 /** 화면 문구용: '티웨이' → '트리니티' (인식은 둘 다 받음) */
@@ -82,8 +85,8 @@ export function parseFlightList(raw) {
   out.forEach((f, i) => {
     let dep = '', arr = '';
     if (airports.length >= 2) {
-      if (airports.length > i + 1) { dep = airports[i]; arr = airports[i + 1]; }
-      else if (airports.length === 2 && out.length === 2 && i === 1) { dep = airports[1]; arr = airports[0]; } // 왕복: 거꾸로
+      if (airports.length === 2) { [dep, arr] = i % 2 === 0 ? [airports[0], airports[1]] : [airports[1], airports[0]]; } // 두 공항뿐이면 왕복처럼 번갈아 (v2.4.0: 3·4레그 퀵턴)
+      else if (airports.length > i + 1) { dep = airports[i]; arr = airports[i + 1]; }
     }
     f.dep = dep; f.arr = arr;
   });
@@ -96,10 +99,10 @@ export function flightLabel(f) {
   return f.dep && f.arr ? `${f.iata} ${f.dep}-${f.arr}` : f.iata;
 }
 
-/** 왕복·여러 편의 이름: 2편이면 가는 편/오는 편, 그 밖은 1편·2편… */
+/** 왕복·여러 편의 이름: 2편이면 가는 편/오는 편, 3편 이상은 1레그·2레그… (v2.4.0) */
 export function legName(i, n) {
   if (n === 2) return i === 0 ? '가는 편' : '오는 편';
-  return n > 1 ? `${i + 1}편` : '비행';
+  return n > 1 ? `${i + 1}레그` : '비행';
 }
 
 const HHMM_RE = /^\d{1,2}:\d{2}$/;
@@ -144,12 +147,20 @@ export function gfFlights(gf) {
   return main.map(f => ({ no: f.iata, iata: f.iata, icao: f.icao, airline: f.airline, number: f.number, dep: f.dep, arr: f.arr, std: '', sta: '', source: '' }));
 }
 
-/** 왕복·여러 편을 짧게: 'TW721/TW806 GMP-CJU' (한 편이면 gf.flight 그대로) */
+/** 왕복·여러 편을 짧게: 2편 'TW721/TW806 GMP-CJU', 3편 이상 'TW721 외 2' (한 편이면 gf.flight 그대로) */
 export function flightsText(gf) {
   const legs = gfFlights(gf);
   if (legs.length < 2) return gf && gf.flight ? String(gf.flight) : '';
+  if (legs.length >= 3) return legsSummary(legs);
   const r = legs[0].dep && legs[0].arr ? ` ${legs[0].dep}-${legs[0].arr}` : '';
   return `${legs.map(l => l.iata).join('/')}${r}`;
+}
+
+/** 제목·툴팁용 아주 짧은 편명 요약: 'TW501' · 'TW721 외 1' · 'TW241 외 3' (v2.4.0) */
+export function legsSummary(legs) {
+  const list = (legs || []).map(l => (l && (l.iata || l.no)) || '').filter(Boolean);
+  if (!list.length) return '';
+  return list.length === 1 ? list[0] : `${list[0]} 외 ${list.length - 1}`;
 }
 
 /**
@@ -167,6 +178,7 @@ export function buildGfFlightFields(legsIn) {
       if (legs.some(x => x.no === f.iata)) return;
       const up = v => String(v || '').trim().toUpperCase();
       const leg = { no: f.iata, dep: (j === 0 && /^[A-Z]{3}$/.test(up(L.dep)) ? up(L.dep) : f.dep) || '', arr: (j === 0 && /^[A-Z]{3}$/.test(up(L.arr)) ? up(L.arr) : f.arr) || '' };
+      if (legs.length >= MAX_LEGS) return;
       if (list.length === 1 && (HHMM_RE.test(String(L.std || '')) || HHMM_RE.test(String(L.sta || '')))) {
         leg.std = HHMM_RE.test(String(L.std || '')) ? L.std : '';
         leg.sta = HHMM_RE.test(String(L.sta || '')) ? L.sta : '';
@@ -175,8 +187,10 @@ export function buildGfFlightFields(legsIn) {
       legs.push(leg);
     });
   }
-  // 오는 편 구간이 비어 있고 가는 편 구간이 있으면 거꾸로
-  if (legs.length === 2 && legs[0].dep && legs[0].arr && !legs[1].dep && !legs[1].arr) { legs[1].dep = legs[0].arr; legs[1].arr = legs[0].dep; }
+  // 뒤 레그의 구간이 모두 비어 있고 첫 레그 구간이 있으면 번갈아 거꾸로 (왕복·퀵턴 2회 왕복: A-B, B-A, A-B, B-A)
+  if (legs.length >= 2 && legs[0].dep && legs[0].arr && legs.slice(1).every(l => !l.dep && !l.arr)) {
+    legs.forEach((l, i) => { if (i % 2 === 1) { l.dep = legs[0].arr; l.arr = legs[0].dep; } else if (i > 0) { l.dep = legs[0].dep; l.arr = legs[0].arr; } });
+  }
   if (!legs.length) return { flight: '', flights: null };
   const flight = flightLabel({ iata: legs[0].no, dep: legs[0].dep, arr: legs[0].arr });
   const needArray = legs.length > 1 || legs.some(l => l.source === 'manual');
@@ -185,21 +199,24 @@ export function buildGfFlightFields(legsIn) {
 
 /**
  * 편명 칸 → 저장할 { flight, flights } (편집창·미리보기 공용)
- *  가는 편 칸에 '721/806' 처럼 쌍을 넣고 오는 편 칸을 비우면 둘로 나눔. 이륙·착륙 칸 값은 source:'manual'.
+ *  v2.4.0: 칸 최대 4개 f1~f4 (이륙 sN · 착륙 aN). 첫 칸에 '721/806' 처럼 여러 편을 넣고 나머지 칸이 비면 편별로 나눔.
+ *  이륙·착륙 칸 값은 source:'manual'.
  */
 export function flightFieldsFromInputs(vals) {
-  const f1 = String(vals.f1 || '').trim().replace(/\s+/g, ' ').toUpperCase();
-  const f2 = String(vals.f2 || '').trim().replace(/\s+/g, ' ').toUpperCase();
-  const list1 = parseFlightList(f1);
+  const clean = v => String(v || '').trim().replace(/\s+/g, ' ').toUpperCase();
+  const f = [], s = [], a = [];
+  for (let i = 1; i <= MAX_LEGS; i++) { f.push(clean(vals[`f${i}`])); s.push(vals[`s${i}`] || ''); a.push(vals[`a${i}`] || ''); }
+  const rest = f.slice(1).some(Boolean);
+  const list1 = parseFlightList(f[0]);
   let legsIn;
-  if (list1.length >= 2 && !f2) {
-    legsIn = list1.map((f, i) => ({ no: flightLabel(f), std: i === 0 ? vals.s1 : i === 1 ? vals.s2 : '', sta: i === 0 ? vals.a1 : i === 1 ? vals.a2 : '' }));
+  if (list1.length >= 2 && !rest) {
+    legsIn = list1.map((x, i) => ({ no: flightLabel(x), std: s[i] || '', sta: a[i] || '' }));
   } else {
-    legsIn = [{ no: f1, std: vals.s1, sta: vals.a1 }];
-    if (f2) legsIn.push({ no: f2, std: vals.s2, sta: vals.a2 });
+    legsIn = [];
+    f.forEach((no, i) => { if (no) legsIn.push({ no, std: s[i], sta: a[i] }); });
   }
   const out = buildGfFlightFields(legsIn);
-  if (!out.flight && (f1 || f2)) out.flight = f1 || f2; // 알아볼 수 없는 글자는 그대로 둠 (상세 카드가 안내)
+  if (!out.flight && f.some(Boolean)) out.flight = f.find(Boolean); // 알아볼 수 없는 글자는 그대로 둠 (상세 카드가 안내)
   return out;
 }
 

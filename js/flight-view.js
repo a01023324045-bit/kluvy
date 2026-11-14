@@ -127,3 +127,52 @@ export function airlabsReference({ leg, entry, dateKey }) {
   if (!notes.length) notes.push(SCHEDULED_NOTE); // 안내는 한 줄만
   return { summary, live: hasLiveTimes(live), lines, warns, notes };
 }
+
+// ---------------- v2.4.0 하루 여러 레그(1·2·3·4레그) 선택 ----------------
+// 퀵턴처럼 하루에 레그가 2개 이상이면 상세 카드에 레그 칩(1 TW721 · 2 TW806 …)을 두고, 고른 레그 하나만 보여 준다.
+// AirLabs 무료 한도를 아끼려고 조회는 '고른 레그만' 한다. 조회 결과는 이미 편명·날짜별로 저장되어 있다
+//  (flightTimes/{편명}/days/{날짜} 실시간, flightTimes/{편명}/airlabs 정기 노선) → 레그마다 따로 캐시되고 두 폰이 공유한다.
+
+/** 고른 레그 번호(0부터)를 범위 안으로 */
+export function clampLeg(i, n) {
+  const k = Math.trunc(Number(i));
+  if (!Number.isFinite(k) || n < 1) return 0;
+  return Math.min(Math.max(k, 0), n - 1);
+}
+
+/** 레그 칩 글자: '1 TW721' */
+export function legChipLabel(leg, i) {
+  return `${i + 1} ${(leg && (leg.iata || leg.no)) || ''}`.trim();
+}
+
+/** 레그별 캐시 키 (Firebase 경로 그대로): 'flightTimes/TW721/days/2026-11-14' */
+export function legCacheKey(iata, dateKey) {
+  return `flightTimes/${iata}/days/${dateKey}`;
+}
+export function routeCacheKey(iata) {
+  return `flightTimes/${iata}/airlabs`;
+}
+
+/** 조회 버튼 글자: 한 레그면 '예정/실제 시각 불러오기', 여러 레그면 '2레그 예정/실제 시각 불러오기' */
+export function lookupButtonText(i, n) {
+  return n > 1 ? `${i + 1}레그 예정/실제 시각 불러오기` : '예정/실제 시각 불러오기';
+}
+
+/**
+ * 선택 상태: 같은 날짜·같은 편명 묶음이 계속 열려 있는 동안만 고른 레그를 유지하고, 다른 날짜로 갔다 오거나 편명이 바뀌면 1레그로 돌아간다.
+ * @param {{sig:string, idx:number}|null} prev  이전 상태
+ * @returns {{sig:string, idx:number}} 새 상태 (idx 는 범위 안)
+ */
+export function resolveLegSelection(prev, dateKey, legs) {
+  const sig = `${dateKey}|${(legs || []).map(l => l.iata).join('/')}`;
+  if (prev && prev.sig === sig) return { sig, idx: clampLeg(prev.idx, (legs || []).length) };
+  return { sig, idx: 0 };
+}
+
+/** 이 레그를 조회하면 AirLabs 를 실제로 부르게 되나? (캐시가 신선하면 부르지 않음) — flight-times.lookupFlightOnAirlabs 와 같은 기준 */
+export function wouldCallAirlabs(entry, dateKey, now, { liveTtlMin, routeTtlDays, routesOnly }) {
+  const day = entry && entry.days && entry.days[dateKey];
+  const liveFresh = Boolean(day && day.fetchedAt && now - day.fetchedAt < liveTtlMin * 60000);
+  const routeFresh = Boolean(entry && entry.airlabs && entry.airlabs.fetchedAt && now - entry.airlabs.fetchedAt < routeTtlDays * 86400000);
+  return routesOnly ? !routeFresh : !liveFresh; // 오늘·어제·내일은 실시간(flight) 캐시, 그 밖은 정기 노선(routes) 캐시
+}

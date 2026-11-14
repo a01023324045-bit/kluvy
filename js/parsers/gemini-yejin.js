@@ -1,7 +1,7 @@
 // 예진 스케줄 사진 → Gemini Vision JSON → 일정 매핑
 // 2단계(7번): responseSchema 로 형식 강제(YEJIN_SCHEMA), 호출은 gemini-client.js(모델 설정값·404 자동 대체·한글 오류),
 //             저장 전 미리보기용 행 만들기(buildYejinPreviewRows). 매핑(mapGeminiItem)은 1단계 그대로.
-import { normalizeFlight, buildGfFlightFields } from '../flight.js';
+import { normalizeFlight, buildGfFlightFields, parseFlightList } from '../flight.js';
 import { isStayFlight, extractStandbyCode, defaultTimesFor } from '../schedule-model.js';
 import { makeDateKey } from '../dates.js';
 import { generateJson } from './gemini-client.js';
@@ -29,17 +29,24 @@ export const GEMINI_PROMPT = `이 이미지는 트리니티항공(2026-09 티웨
 - 공항 대기(ISA, ISB, ISC, ISD, GSA, GSB, GSC, GSD)는 SBY 로 바꾸지 말고 적힌 코드 그대로 type 에 적고, 칸에 시간이 있으면 start/end 에 적으세요.
 - 시각은 사진에 적힌 그대로(그 공항의 현지시각) "HH:MM" 형식으로 적으세요.
 - 편명(flight)을 꼭 찾아 적으세요: 비행 칸(퀵턴·체류 출발/귀국·비행)에 편명 숫자가 보이면 flight 에 적습니다.
-  · 'TW405', 'TWB405', '405', '0405' 처럼 2~4자리 숫자만 보여도 편명입니다 → "TW405" 형식 (앞의 0 은 빼고 TW 를 붙임)
-  · 출발-도착 공항 코드(예: ICN-FCO, ICN→SYD, 인천-로마)가 함께 보이면 "TW405 ICN-FCO" 처럼 3글자 코드로 붙이세요
-  · 한 칸에 왕복 두 편(예: 241/242)이 보이면 "TW241/TW242" 처럼 모두 적으세요
-  · 사진에는 'TW' 가 빠진 숫자 쌍으로 찍힙니다. 예) 칸에 '721/806  GMP-CJU  14:30~19:00  TRAIN 20:31~22:21' 이면
-    - '721/806' = 왕복 편명 쌍: 앞 숫자 = 가는 편 TW721, 뒤 숫자 = 오는 편 TW806 → flight: "TW721/TW806 GMP-CJU", flights: ["TW721 GMP-CJU", "TW806 CJU-GMP"]
-    - 'GMP-CJU' 처럼 영문 3글자-영문 3글자는 공항 코드(구간)이지 편명이 아닙니다. 가는 편 구간이고, 오는 편은 거꾸로(CJU-GMP)입니다
-    - '14:30~19:00' 은 근무 시간(집합~해산)입니다 → start: "14:30", end: "19:00". 비행기 이륙·착륙 시각이 아니니 편명 시각으로 쓰지 마세요
+  · ★ 한 칸에 편명이 여러 개면 보이는 순서대로 전부 적으세요. 하나도 빠뜨리거나 합치거나 지어내지 마세요. 사용자가 편명을 따로 입력하는 일이 없어야 합니다.
+  · 'TW405', 'TWB405', '405', '0405' 처럼 2~4자리 숫자만 보여도 편명입니다 → \"TW405\" 형식 (앞의 0 은 빼고 TW 를 붙임)
+  · 사진에는 'TW' 가 빠진 숫자로 찍힙니다. 칸에서 편명 숫자가 몇 개인지 먼저 세어 flightCount 에 적고, 그 개수만큼 flights 배열에 순서대로 하나씩 적으세요.
+    - '721/806' → flightCount 2, flights: [\"TW721 GMP-CJU\", \"TW806 CJU-GMP\"]  (앞 숫자 = 가는 편 TW721, 뒤 숫자 = 오는 편 TW806)
+    - '241/242/243' → flightCount 3, flights: [\"TW241\", \"TW242\", \"TW243\"]  (3개)
+    - '241/242/243/244' → 4개  (퀵턴 하루 2회 왕복)
+    - '501 … 502' · '501 502' · '501, 502' · '501→502' · '501·502' · 'TW501 / TW502' 도 모두 편명 두 개입니다
+    - 편명 하나만 있으면 flightCount 1, flights 는 생략하거나 한 개
+  · flight 문자열에도 전부 적으세요: 편명이 여러 개면 \"TW721/TW806\" · \"TW241/TW242/TW243\" 처럼 '/' 로 이어서 (뒤 편명에도 TW 를 붙임), 공항 코드가 있으면 뒤에 \"TW721/TW806 GMP-CJU\"
+  · 각 레그의 출발-도착 공항 코드가 사진에 보이면 flights 각 항목에 붙이세요 (예: ICN-FCO, ICN→SYD, 인천-로마 → 3글자 코드). 공항이 둘뿐인 왕복·퀵턴이면 레그마다 번갈아 뒤집습니다 (ICN-NRT, NRT-ICN, ICN-NRT, NRT-ICN). 사진에 공항이 안 보이면 붙이지 마세요.
+  · 'GMP-CJU' 처럼 영문 3글자-영문 3글자는 공항 코드(구간)이지 편명이 아닙니다
+  · 예) 칸에 '721/806  GMP-CJU  14:30~19:00  TRAIN 20:31~22:21' 이면
+    - flight: \"TW721/TW806 GMP-CJU\", flights: [\"TW721 GMP-CJU\", \"TW806 CJU-GMP\"], flightCount: 2
+    - '14:30~19:00' 은 근무 시간(집합~해산)입니다 → start: \"14:30\", end: \"19:00\". 비행기 이륙·착륙 시각이 아니니 편명 시각으로 쓰지 마세요
     - 'TRAIN 20:31~22:21' 같은 기차·이동 시각은 start/end 에 넣지 마세요
     - 근무 칸 안의 3~4자리 숫자 쌍(721/806)은 날짜가 아니라 편명입니다
   · 화면에 '티웨이'·'트리니티'·'TW'·'TWB' 어느 쪽으로 보여도 같은 회사입니다
-  · 숫자가 편명인지 확실하지 않으면(시각·날짜일 수 있으면) 빈 문자열("")로 두세요. 지어내지 마세요.
+  · 숫자가 편명인지 확실하지 않으면(시각·날짜일 수 있으면) 빈 문자열(\"\")로 두세요. 지어내지 마세요.
 - 사진에 없는 날은 넣지 마세요.`;
 
 /** Gemini responseSchema (OpenAPI 부분집합) — 형식 강제 */
@@ -58,8 +65,9 @@ export const YEJIN_SCHEMA = {
           destination: { type: 'STRING' },
           start: { type: 'STRING', description: 'HH:MM 또는 빈 문자열. 퀵턴·왕복은 근무 집합 시각(비행기 이륙 시각 아님)' },
           end: { type: 'STRING', description: 'HH:MM 또는 빈 문자열. 퀵턴·왕복은 근무 해산 시각(비행기 착륙 시각 아님)' },
-          flight: { type: 'STRING', description: "편명. 예: 'TW405', 'TW405 ICN-FCO', 'TW721/TW806 GMP-CJU'. 숫자만 보이면 TW 를 붙임('721/806' = TW721 가는 편 / TW806 오는 편). 확실하지 않으면 빈 문자열" },
-          flights: { type: 'ARRAY', items: { type: 'STRING' }, description: "왕복이면 편별로 [가는 편, 오는 편]. 예: ['TW721 GMP-CJU', 'TW806 CJU-GMP']. 한 편이면 생략 가능" },
+          flight: { type: 'STRING', description: "편명 전부(보이는 순서). 예: 'TW405', 'TW405 ICN-FCO', 'TW721/TW806 GMP-CJU', 'TW241/TW242/TW243'. 숫자만 보이면 TW 를 붙임('721/806' = TW721 가는 편 / TW806 오는 편). 확실하지 않으면 빈 문자열" },
+          flightCount: { type: 'INTEGER', description: '이 칸에 보이는 편명(숫자)의 개수 — 먼저 세고 그만큼 flights 에 적을 것 (0~4)' },
+          flights: { type: 'ARRAY', items: { type: 'STRING' }, description: "레그별 편명, 사진에 보이는 순서 그대로 전부(최대 4). 예: ['TW721 GMP-CJU', 'TW806 CJU-GMP'] · ['TW241', 'TW242', 'TW243']. 공항 코드가 보이면 붙임. 한 편이면 생략 가능" },
           isInbound: { type: 'BOOLEAN' },
           isArrivalOnly: { type: 'BOOLEAN' },
           isPureStay: { type: 'BOOLEAN' },
@@ -160,14 +168,24 @@ export function mapGeminiItem(item) {
   return out;
 }
 
-/** Gemini 의 flight/flights → { flight, flights } (알아볼 수 없는 글자는 flight 에 그대로) */
+/**
+ * Gemini 의 flight/flights → { flight, flights } (알아볼 수 없는 글자는 flight 에 그대로)
+ * v2.4.0: 레그 N개(최대 4). flight 문자열('TW241/TW242/TW243 ICN-NRT')과 flights 배열 중 편이 더 많은 쪽을 기준으로 하고,
+ *         없는 편은 다른 쪽에서 보태며, 구간(공항)이 빠진 레그는 다른 쪽에서 채운다.
+ */
 export function geminiFlightFields(item) {
   const raw = String((item && item.flight) || '').trim();
   const list = Array.isArray(item && item.flights) ? item.flights.map(x => String(x || '').trim()).filter(Boolean) : [];
-  let legsIn = list.length ? list.map(no => ({ no })) : [{ no: raw }];
-  // flights 에 구간이 없고 flight 에만 구간이 있으면(예: 'TW721/TW806 GMP-CJU') flight 쪽을 씀
-  if (list.length && raw && buildGfFlightFields([{ no: raw }]).flights && !buildGfFlightFields(legsIn).flight.includes(' ')) legsIn = [{ no: raw }];
-  const fl = buildGfFlightFields(legsIn);
+  const fromList = [];
+  for (const t of list) for (const f of parseFlightList(t)) if (!fromList.some(x => x.iata === f.iata)) fromList.push(f);
+  const fromRaw = parseFlightList(raw);
+  const [base, other] = fromList.length >= fromRaw.length ? [fromList, fromRaw] : [fromRaw, fromList];
+  const merged = base.map(f => {
+    const o = other.find(x => x.iata === f.iata);
+    return { no: f.iata, dep: f.dep || (o && o.dep) || '', arr: f.arr || (o && o.arr) || '' };
+  });
+  for (const o of other) if (!merged.some(m => m.no === o.iata)) merged.push({ no: o.iata, dep: o.dep, arr: o.arr });
+  const fl = buildGfFlightFields(merged);
   if (!fl.flight) return { flight: raw, flights: null };
   return fl;
 }

@@ -151,6 +151,13 @@ input[type="text"], input[type="email"], input[type="password"], input[type="tim
 .timeline-bar { position: absolute; top: 0; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: var(--kv-w-strong); color: #fff; border-radius: 6px; white-space: nowrap; overflow: hidden; transition: all .2s; }
 .manual-tag { display: inline-flex; align-items: center; font-size: 11px; font-weight: var(--kv-w-strong); color: #5b21b6; background: #ede9fe; border: 1px solid #c4b5fd; border-radius: 999px; padding: 1px 7px; margin-left: 4px; vertical-align: middle; }
 
+/* v2.4.0 상세 카드 제목 압축: 큰 글씨 1줄 + 작은 글씨 1줄 (괄호·대괄호 없음, 말줄임 없음) */
+#detailGfShiftText.detail-shift--title { flex: 1 1 100%; text-align: left; }
+.dt-main { font-size: 16px; font-weight: var(--kv-w-title); line-height: 1.35; white-space: nowrap; }
+.dt-sub { font-size: 12.5px; font-weight: var(--kv-w-strong); color: var(--kv-text-2); line-height: 1.4; margin-top: 1px; }
+.dt-tags { margin-top: 3px; line-height: 1.6; }
+.dt-tags .manual-tag { margin-left: 0; margin-right: 4px; }
+
 /* 비행 정보 상자 */
 .flight-box, #selectedDateTitle, #detailMyShiftText, #detailGfShiftText { word-break: keep-all; overflow-wrap: anywhere; } /* 한글 낱말 중간 줄바꿈 방지 (360px) */
 .flight-box { border: 1px solid #bae6fd; background: #f0f9ff; border-radius: 12px; padding: 10px; font-size: 13px; color: var(--kv-text); }
@@ -209,7 +216,7 @@ input[type="text"], input[type="email"], input[type="password"], input[type="tim
 .pv-input { font-size: var(--kv-fs-input); height: 40px; padding: 0 8px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: var(--kv-text); min-width: 0; }
 .pv-type { width: 7.2rem; font-weight: var(--kv-w-strong); }
 .pv-dest { width: 6rem; }
-.pv-flight, .pv-flight2 { width: 9.2rem; text-transform: uppercase; letter-spacing: -0.02em; } /* v2.3.1: 'TW721 GMP-CJU' 가 잘리지 않게 */
+.pv-flight, .pv-flight2, .pv-flight3, .pv-flight4 { flex: 1 1 8.6rem; width: 8.6rem; text-transform: uppercase; letter-spacing: -0.02em; } /* v2.3.1: 'TW721 GMP-CJU' 가 잘리지 않게 */
 .pv-times { display: inline-flex; align-items: center; gap: 2px; }
 .pv-time { width: 4.4rem; font-variant-numeric: tabular-nums; text-align: center; padding: 0 4px; }
 .pv-tilde { color: var(--kv-text-3); }
@@ -258,3 +265,20 @@ textarea.field { height: auto; padding: 8px 10px; line-height: 1.45; }
 .cap-h2c .duty { display: flex; align-items: center; justify-content: center; line-height: normal; letter-spacing: 0; text-overflow: clip; }
 .cap-h2c .cal-day, .cap-h2c .cal-sub, .cap-h2c .duty-time { letter-spacing: 0; text-overflow: clip; }
 .cap-h2c .cal-cell.is-selected { box-shadow: none; outline: 2px solid var(--kv-select); outline-offset: -2px; }
+
+/* v2.4.0 레그 선택 칩 (1 TW721 · 2 TW806 · 3 … · 4 …) */
+.flight-box .fl-legs { display: grid; grid-template-columns: repeat(var(--legs, 2), minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+.flight-box .fl-leg-chip { min-height: 44px; padding: 0 4px; border-radius: 10px; border: 1px solid #7dd3fc; background: #fff; color: #075985; font-size: 12.5px; font-weight: var(--kv-w-strong); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.flight-box .fl-leg-chip.is-on { background: #0369a1; border-color: #0369a1; color: #fff; }
+
+/* v2.4.0 편집창 레그 칸 */
+.leg-block { border: 1px solid var(--kv-line); border-radius: 10px; padding: 8px; background: #f8fafc; }
+.leg-block .leg-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: var(--kv-w-strong); color: var(--kv-text-2); margin-bottom: 4px; }
+.leg-remove { min-height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid #fecdd3; background: #fff; color: #be123c; font-size: 12px; font-weight: var(--kv-w-strong); }
+.leg-add { min-height: 44px; width: 100%; border-radius: 10px; border: 1px dashed #7dd3fc; background: #f0f9ff; color: #075985; font-size: 14px; font-weight: var(--kv-w-strong); }
+
+/* v2.4.0 미리보기 레그별 편명 칸 (최대 4) */
+.pv-legs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.pv-leg-add { height: 40px; padding: 0 12px; border-radius: 8px; border: 1px dashed #7dd3fc; background: #f0f9ff; color: #075985; font-size: 13px; font-weight: var(--kv-w-strong); }
+.pv-legsum { font-size: 12px; font-weight: var(--kv-w-strong); color: var(--kv-text-3); margin-top: 4px; }
+.pv-legsum.is-multi { color: #075985; }

@@ -1,17 +1,18 @@
 // 상세 카드의 '✈️ 비행 정보' 상자 — 편명 정규화·실시간 보기 링크·이륙/착륙(현지+KST)·AirLabs 조회 버튼
-// v2.3.1: 왕복(사진의 '721/806' = TW721 가는 편 + TW806 오는 편)이면 상자 하나 안에 편마다 한 줄(①·②)로 간결하게.
+// v2.4.0: 하루에 레그(편)가 2개 이상(왕복 721/806·퀵턴 241/242/243/244)이면 상단에 레그 칩(1 TW721 · 2 TW806 …)을 두고
+//         고른 레그 하나만 자세히 보여 준다(시각·출처·AirLabs 참고·실시간 링크·[N레그 예정/실제 시각 불러오기]).
+//         기본은 1레그, 선택은 같은 날짜를 보고 있는 동안만 유지(다른 날짜로 갔다 오면 1레그). AirLabs 는 고른 레그만 조회(한도 절약).
 //         크게 보이는 시각은 flight-view.js pickLegTimes (직접 입력 > 근무표 > 실제 > 예상 > 시간표 > 정기),
 //         AirLabs 는 정기·예상·실제·지연 라벨을 붙인 요약 한 줄 + 운항 날짜·구간 한 줄 + 안내 한 줄.
 // 데이터는 textContent 로만 넣는다.
 import { flightLinks, computeFlightTimes, airportCity, dayShift, KOREAN_AIRPORTS, gfFlights } from '../flight.js';
 import { getFlightTable, getAirlabsKey, lookupFlightOnAirlabs, onFlightTimesChanged } from '../flight-times.js';
-import { pickLegTimes, airlabsReference, FREE_PLAN_NOTE } from '../flight-view.js';
+import { pickLegTimes, airlabsReference, resolveLegSelection, clampLeg, legChipLabel, lookupButtonText } from '../flight-view.js';
 
 let lastArgs = null;
 let lastMsg = { key: '', text: '' };
+let legSel = null; // { sig, idx } — 고른 레그 (resolveLegSelection)
 onFlightTimesChanged(() => { if (lastArgs) renderFlightBox(...lastArgs); });
-
-const MARK = ['①', '②', '③', '④', '⑤', '⑥'];
 
 function el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -83,15 +84,15 @@ function airlabsBlock(ref, leg, entry, dateKey, i, pick, compact) {
   return lv;
 }
 
-/** 한 편 상세(편이 하나일 때): 제목 + 이륙/착륙(현지·한국) + 출처 + AirLabs 참고 */
-function renderSingle(wrap, dateKey, gf, leg, entry) {
+/** 한 레그 상세: 제목 + 이륙/착륙(현지·한국) + 출처 + AirLabs 참고 (레그 칩에서 고른 레그도 같은 모양) */
+function renderLeg(wrap, dateKey, gf, leg, entry, idx, legCount) {
   const dep = leg.dep || (entry && entry.dep) || '';
   const arr = leg.arr || (entry && entry.arr) || '';
   const title = el('div', 'fl-title');
   title.append(el('span', '', `✈️ ${leg.iata}`));
   if (dep && arr) title.append(el('span', 'text-[13px] font-semibold text-slate-600', `${airportCity(dep)}(${dep}) → ${airportCity(arr)}(${arr})`));
   wrap.appendChild(title);
-  const pick = pickLegTimes({ leg: { ...leg, dep, arr }, gf, entry, dateKey, legCount: 1 });
+  const pick = pickLegTimes({ leg: { ...leg, dep, arr }, gf, entry, dateKey, legCount });
   let t = null;
   if (pick && (pick.std || pick.sta)) t = computeFlightTimes({ dep, arr, std: pick.std, sta: pick.sta }, dateKey);
   if (t) {
@@ -103,46 +104,32 @@ function renderSingle(wrap, dateKey, gf, leg, entry) {
     src.dataset.kind = pick.kind;
     wrap.appendChild(src);
   } else {
-    wrap.appendChild(el('div', 'fl-src', '이 편의 시각을 아직 모릅니다. 근무표에 시각이 있는 같은 편이 등록되면 자동으로 배웁니다.'));
+    wrap.appendChild(el('div', 'fl-src', `${legCount > 1 ? `${idx + 1}레그` : '이 편'}의 시각을 아직 모릅니다. 근무표에 시각이 있는 같은 편이 등록되면 자동으로 배웁니다.`));
   }
   const ref = airlabsReference({ leg: { ...leg, dep, arr }, entry, dateKey });
-  if (ref) wrap.appendChild(airlabsBlock(ref, leg, entry, dateKey, 0, pick, false));
+  if (ref) wrap.appendChild(airlabsBlock(ref, leg, entry, dateKey, idx, pick, false));
 }
 
-/** 여러 편(왕복): 편마다 한 줄 '① TW721 김포→제주 15:40 → 16:55 (예상)' + AirLabs 요약 */
-function renderLegsCompact(wrap, dateKey, gf, legs, table) {
-  wrap.appendChild(el('div', 'fl-title', `✈️ ${legs.map(l => l.iata).join(' · ')}`));
-  const notes = [];
+/** 레그 칩 줄 (레그가 2개 이상일 때): [1 TW721] [2 TW806] … — 눌러서 그 레그만 본다 */
+function renderChips(box, dateKey, gf, legs, sel) {
+  const row = el('div', 'fl-legs');
+  row.setAttribute('role', 'tablist');
+  row.setAttribute('aria-label', '레그 선택');
+  row.style.setProperty('--legs', String(Math.min(legs.length, 4)));
   legs.forEach((leg, i) => {
-    const entry = table[leg.iata] || null;
-    const dep = leg.dep || (entry && entry.dep) || '';
-    const arr = leg.arr || (entry && entry.arr) || '';
-    const row = el('div', 'fl-leg-row');
-    row.dataset.leg = String(i);
-    row.dataset.flight = leg.iata;
-    const line = el('div', 'fl-leg-line');
-    line.append(el('b', 'fl-leg-no', `${MARK[i] || `${i + 1}.`} ${leg.iata}`));
-    if (dep && arr) line.append(document.createTextNode(` ${airportCity(dep)}→${airportCity(arr)} `));
-    const pick = pickLegTimes({ leg: { ...leg, dep, arr }, gf, entry, dateKey, legCount: legs.length });
-    const t = pick && (pick.std || pick.sta) ? computeFlightTimes({ dep, arr, std: pick.std, sta: pick.sta }, dateKey) : null;
-    if (t) {
-      const tag = pick.kind === 'manual' ? '직접 입력' : (pick.depTag === pick.arrTag ? pick.depTag : [pick.depTag, pick.arrTag].filter(Boolean).join('/'));
-      const tm = el('span', `nowrap fl-time${pick.kind === 'estimated' || pick.kind === 'actual' ? ' fl-time--est' : pick.kind === 'scheduled' ? ' fl-time--sched' : ''}`, `${t.dep.local} → ${t.arr.local}`);
-      line.append(tm);
-      const tail = kstTail(t.arr, dateKey);
-      if (tail) line.append(el('span', 'nowrap', tail));
-      if (tag) line.append(el('span', `fl-leg-tag fl-src--${pick.kind}`, ` (${tag})`));
-      line.dataset.kind = pick.kind;
-    } else {
-      line.append(el('span', 'fl-src', '시각 모름'));
-    }
-    row.appendChild(line);
-    const ref = airlabsReference({ leg: { ...leg, dep, arr }, entry, dateKey });
-    if (ref) { row.appendChild(airlabsBlock(ref, leg, entry, dateKey, i, pick, true)); notes.push(...ref.notes); }
-    wrap.appendChild(row);
+    const b = el('button', `fl-leg-chip${i === sel ? ' is-on' : ''}`, legChipLabel(leg, i));
+    b.type = 'button';
+    b.dataset.leg = String(i);
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(i === sel));
+    b.setAttribute('aria-label', `${i + 1}레그 ${leg.iata}`);
+    b.addEventListener('click', () => {
+      legSel = { sig: legSel ? legSel.sig : '', idx: i };
+      renderFlightBox(box, dateKey, gf);
+    });
+    row.appendChild(b);
   });
-  // 안내는 상자 전체에 한 줄만 (무료 플랜 안내가 있으면 그것)
-  if (notes.length) wrap.appendChild(el('div', 'fl-src', notes.includes(FREE_PLAN_NOTE) ? FREE_PLAN_NOTE : notes[0]));
+  return row;
 }
 
 /**
@@ -154,6 +141,7 @@ export function renderFlightBox(box, dateKey, gf) {
   lastArgs = [box, dateKey, gf];
   box.innerHTML = '';
   const legs = gfFlights(gf);
+  if (!legs.length) legSel = null; // 비행 없는 날을 거치면 다음에 비행 날을 열 때 1레그부터
   if (!legs.length) {
     // v2.3.0: 비행 근무인데 편명이 없으면 왜 비행 정보가 없는지 알려 줌 (조용히 숨기지 않음)
     if (isFlightDuty(gf)) {
@@ -182,50 +170,46 @@ export function renderFlightBox(box, dateKey, gf) {
   const table = getFlightTable();
   const hasKey = Boolean(getAirlabsKey());
   const multi = legs.length > 1;
+  legSel = resolveLegSelection(legSel, dateKey, legs); // 같은 날짜가 열려 있는 동안만 고른 레그 유지, 아니면 1레그
+  const sel = clampLeg(legSel.idx, legs.length);
+  const leg = legs[sel];
   const wrap = el('div', 'flight-box');
   wrap.dataset.flight = legs.map(l => l.iata).join('/');
-  if (multi) renderLegsCompact(wrap, dateKey, gf, legs, table);
-  else renderSingle(wrap, dateKey, gf, legs[0], table[legs[0].iata] || null);
+  wrap.dataset.selectedLeg = String(sel);
+  wrap.dataset.legCount = String(legs.length);
+  if (multi) wrap.appendChild(renderChips(box, dateKey, gf, legs, sel));
+  renderLeg(wrap, dateKey, gf, leg, table[leg.iata] || null, sel, legs.length);
 
-  // 실시간 보기 링크 (편마다) + AirLabs 조회(모든 편) + 시각 직접 입력
-  const linkLabel = el('div', 'fl-src', multi ? '✈️ 실시간 보기 (새 창)' : `✈️ ${legs[0].iata} 실시간 보기 (새 창)`);
+  // 실시간 보기 링크 (고른 레그) + AirLabs 조회(고른 레그만) + 시각 직접 입력
+  const linkLabel = el('div', 'fl-src', `✈️ ${leg.iata} 실시간 보기 (새 창)`);
   linkLabel.style.marginTop = '8px';
   linkLabel.style.fontWeight = '600';
   wrap.appendChild(linkLabel);
   const links = el('div', 'fl-links');
   links.style.marginTop = '4px';
-  legs.forEach((leg, i) => {
-    for (const l of flightLinks(leg)) {
-      const a = el('a', 'fl-link', multi ? `${MARK[i] || i + 1} ${l.name === 'Flightradar24' ? 'FR24' : l.name}` : l.name);
-      a.href = l.url;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.setAttribute('aria-label', `${leg.iata} ${l.name} 에서 실시간 보기`);
-      a.prepend(el('i', 'fa-solid fa-arrow-up-right-from-square'));
-      links.appendChild(a);
-    }
-  });
-  const msgKey = `${legs.map(l => l.iata).join('/')}|${dateKey}`;
+  for (const l of flightLinks(leg)) {
+    const a = el('a', 'fl-link', l.name);
+    a.href = l.url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.setAttribute('aria-label', `${leg.iata} ${l.name} 에서 실시간 보기`);
+    a.prepend(el('i', 'fa-solid fa-arrow-up-right-from-square'));
+    links.appendChild(a);
+  }
+  const msgKey = `${leg.iata}|${dateKey}`;
   if (hasKey) {
-    const btn = el('button', 'fl-btn', '예정/실제 시각 불러오기');
+    const btn = el('button', 'fl-btn', lookupButtonText(sel, legs.length));
     btn.type = 'button';
     btn.id = 'btnAirlabsLookup';
+    btn.dataset.leg = String(sel);
     btn.onclick = async () => {
       btn.disabled = true;
       btn.textContent = '불러오는 중...';
-      const msgs = [];
-      let ok = true;
-      for (let i = 0; i < legs.length; i++) {
-        const leg = legs[i];
-        const e = table[leg.iata] || {};
-        const dep = leg.dep || e.dep || '', arr = leg.arr || e.arr || '';
-        let r;
-        try { r = await lookupFlightOnAirlabs(dep && arr ? `${leg.iata} ${dep}-${arr}` : leg.iata, dateKey); } catch (err) { r = { ok: false, message: `조회 중 오류: ${err && err.message ? err.message : err}` }; }
-        ok = ok && r.ok;
-        msgs.push(multi ? `${MARK[i] || i + 1} ${r.message}` : r.message);
-        if (!r.ok && /키/.test(r.message)) break; // 키 오류면 다음 편도 같음
-      }
-      lastMsg = { key: msgKey, text: msgs.join(' / '), ok };
+      const e = table[leg.iata] || {};
+      const dep = leg.dep || e.dep || '', arr = leg.arr || e.arr || '';
+      let r;
+      try { r = await lookupFlightOnAirlabs(dep && arr ? `${leg.iata} ${dep}-${arr}` : leg.iata, dateKey); } catch (err) { r = { ok: false, message: `조회 중 오류: ${err && err.message ? err.message : err}` }; }
+      lastMsg = { key: msgKey, text: multi ? `${sel + 1}레그 ${r.message}` : r.message, ok: r.ok };
       renderFlightBox(box, dateKey, gf);
     };
     links.appendChild(btn);
@@ -233,7 +217,7 @@ export function renderFlightBox(box, dateKey, gf) {
   const manualBtn = el('button', 'fl-link fl-manual', '시각 직접 입력');
   manualBtn.type = 'button';
   manualBtn.id = 'btnFlightManual';
-  manualBtn.addEventListener('click', () => openEditForFlight('inputGfFl1Std'));
+  manualBtn.addEventListener('click', () => openEditForFlight(`inputGfFl${sel + 1}Std`));
   links.appendChild(manualBtn);
   wrap.appendChild(links);
   if (lastMsg.key === msgKey && lastMsg.text) {
