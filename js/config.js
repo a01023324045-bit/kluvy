@@ -86,3 +86,6 @@ export function getAirlabsBase() {
 export function getGeminiModelsEndpoint(apiKey) {
   return `${getGeminiBase()}/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=200`;
 }
+
+/** 화면에 보여 줄 앱 버전 (sw.js CACHE_VERSION 과 함께 표시) */
+export const APP_VERSION = '2.4.3';

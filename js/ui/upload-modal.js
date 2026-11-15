@@ -1,7 +1,7 @@
 // 근무표 등록(업로드) 모달
 // 2단계: 규호 칸은 엑셀 또는 사진(jpg/png → Gemini), 예진 사진도 Gemini. 사진 인식 결과는 '미리보기'에서 확인·수정 후
 //        [캘린더에 반영]을 눌러야 저장. 예진 사진은 반영할 때 한 번만 업로드(1단계까지는 고를 때 + 반영할 때 두 번).
-import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, GEMINI_MODEL } from '../config.js';
+import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, GEMINI_MODEL, APP_VERSION } from '../config.js';
 import { state } from '../state.js';
 import { makeDateKey, makeMonthKey } from '../dates.js';
 import { safeSetStorage } from '../storage.js';
@@ -138,6 +138,8 @@ export function onFileSelected(who) {
 }
 
 export function openUploadModalForCurrentMonth() {
+  // v2.4.2: 앱 버전·저장된 화면(캐시) 표시
+  renderAppVersion();
   setUploadTargetMonth(state.currentYear, state.currentMonth);
   const savedKey = localStorage.getItem(STORAGE_KEYS.geminiKey) || '';
   const keyInput = document.getElementById('geminiApiKey');
@@ -450,4 +452,37 @@ export async function processUploadFiles() {
     const progressBox = document.getElementById('ocrProgressBox');
     if (progressBox) progressBox.classList.add('hidden');
   }
+}
+
+/** 앱 버전 표시: 모달을 열 때 현재 버전과 저장된 화면(캐시) 이름을 보여 준다 */
+export async function renderAppVersion() {
+  const el = document.getElementById('appVersionText');
+  if (!el) return;
+  let cache = '';
+  try {
+    const keys = await caches.keys();
+    cache = (keys.find(k => k.startsWith('kluvy-')) || '').replace('kluvy-', '');
+  } catch (e) { /* caches 없음 */ }
+  // index.html 에 적힌 버전과 이 파일(config.js)의 버전이 다르면 일부 파일만 올라간 상태다.
+  const metaVer = (document.querySelector('meta[name="kluvy-version"]') || {}).content || '';
+  const problems = [];
+  if (metaVer && metaVer !== APP_VERSION) problems.push(`화면 파일 v${metaVer}`);
+  if (cache && cache !== 'v' + APP_VERSION) problems.push(`저장된 화면 ${cache}`);
+  el.textContent = `앱 버전 v${APP_VERSION}` + (problems.length ? ` · 예전 파일 있음(${problems.join(', ')}) → [업데이트 확인]` : '');
+  el.className = problems.length ? 'help !mt-0 !text-amber-700 font-bold' : 'help !mt-0';
+}
+
+/** 서비스워커·캐시를 새로 받고 최신 파일로 다시 불러온다 */
+export async function checkForUpdate() {
+  const btn = document.getElementById('btnCheckUpdate');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-rotate fa-spin"></i>확인 중'; }
+  try {
+    if (navigator.serviceWorker) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) await reg.update();
+    }
+    const keys = await caches.keys();
+    await Promise.all(keys.map(k => caches.delete(k)));
+  } catch (e) { console.warn('업데이트 확인 실패:', e); }
+  location.reload();
 }

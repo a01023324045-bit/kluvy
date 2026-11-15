@@ -16,7 +16,7 @@ import {
 import {
   openUploadModalForCurrentMonth, closeUploadModal, onMonthSelectorChange, onFileSelected,
   toggleApiKeyInput, onApiKeyChanged, onGeminiModelChanged, toggleCloudSyncInput, clearTargetMonthData, processUploadFiles,
-  onAirlabsKeyChanged, checkAirlabsConnection
+  onAirlabsKeyChanged, checkAirlabsConnection, checkForUpdate
 } from './ui/upload-modal.js';
 import { cancelRecognizePreview, applyRecognizePreview } from './ui/recognize-preview.js';
 import { fbLoginFromForm, fbLogout } from './ui/login.js';
@@ -34,7 +34,7 @@ export const handlers = {
   // 업로드 / 설정
   openUploadModalForCurrentMonth, closeUploadModal, onMonthSelectorChange, onFileSelected,
   toggleApiKeyInput, onApiKeyChanged, onGeminiModelChanged, toggleCloudSyncInput, onFirebaseUrlChanged, clearTargetMonthData, processUploadFiles,
-  onAirlabsKeyChanged, checkAirlabsConnection,
+  onAirlabsKeyChanged, checkAirlabsConnection, checkForUpdate,
   // 인식 결과 미리보기
   cancelRecognizePreview, applyRecognizePreview,
   // 로그인

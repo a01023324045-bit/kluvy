@@ -17,6 +17,17 @@ import { isSafeImageDataUrl } from './escape.js';
 // inline onclick 등에서 쓸 수 있도록 전역 노출
 Object.assign(window, handlers);
 
+// 새 버전이 활성화되면(서비스워커 교체) 한 번 자동 새로고침 — 탭이 옛 JS로 계속 도는 것을 막는다.
+if ('serviceWorker' in navigator) {
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloadedForUpdate = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloadedForUpdate) return;
+    reloadedForUpdate = true;
+    location.reload();
+  });
+}
+
 setOnAuthInvalidated(updateFbLoginUI);
 
 function loadLocalData() {
