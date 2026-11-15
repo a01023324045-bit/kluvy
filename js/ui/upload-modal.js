@@ -516,7 +516,8 @@ export async function renderAppVersion() {
   let cache = '';
   try {
     const keys = await caches.keys();
-    cache = (keys.find(k => k.startsWith('kluvy-')) || '').replace('kluvy-', '');
+    // 앱 파일 캐시(kluvy-v2.5.0)만 본다 — CDN 아이콘·엑셀 라이브러리 캐시(kluvy-cdn-…)는 버전과 무관
+    cache = (keys.find(k => /^kluvy-v\d/.test(k)) || '').replace('kluvy-', '');
   } catch (e) { /* caches 없음 */ }
   // index.html 에 적힌 버전과 이 파일(config.js)의 버전이 다르면 일부 파일만 올라간 상태다.
   const metaVer = (document.querySelector('meta[name="kluvy-version"]') || {}).content || '';
@@ -529,6 +530,8 @@ export async function renderAppVersion() {
 
 /** 서비스워커·캐시를 새로 받고 최신 파일로 다시 불러온다 */
 export async function checkForUpdate() {
+  // v2.5.0: 오프라인에서 캐시를 지우면 앱이 아예 안 열리므로 막는다
+  if (navigator.onLine === false) { alert('지금은 오프라인이라 업데이트를 확인할 수 없습니다. 인터넷에 연결한 뒤 다시 눌러 주세요.'); return; }
   const btn = document.getElementById('btnCheckUpdate');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-rotate fa-spin"></i>확인 중'; }
   try {

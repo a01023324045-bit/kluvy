@@ -11,6 +11,9 @@
 // 빈 폰 보호: 이 폰에 근무표가 없던 채 시작하면 서버를 한 번 받기 전에는 아무것도 보내지 않는다(편집은 큐에 보관).
 //         서버 schedules 가 null 이면: v2 가 지운 기록(kluvyMeta/schedules)이 있을 때만 로컬도 비우고,
 //         없으면(서버가 처음부터 빔) v1 처럼 이 폰 데이터를 올린다. 빈 근무표를 통째로 올리는 일은 없다.
+// 오프라인(v2.5.0): 비행기모드·서버에 못 닿음이면 이 폰 저장분(localStorage·IndexedDB)을 그대로 보여 주고 아무것도 덮지 않는다.
+//         배지는 '오프라인'(툴팁 「오프라인 · 마지막 동기화 11/15 17:42」) — 토큰 문제인 '로그인 필요'와 구분.
+//         마지막 동기화 시각은 localStorage 'kluvy_last_sync_at' 에 저장해 다음 실행·오프라인에서도 보여 준다.
 import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, getConfiguredDbUrl } from './config.js';
 import { getFbAuthQuery, getIdTokenExpiry, invalidateIdToken, fbIsLoggedIn } from './auth.js';
 import { safeGetStorage, safeSetStorage } from './storage.js';
@@ -20,6 +23,7 @@ import { renderCalendar } from './render/calendar.js';
 import { getDbBaseUrl, buildDbUrl, dbFetch, dbGetJson } from './db-rest.js';
 import * as core from './sync-core.js';
 import { clearUndo } from './upload-undo.js';
+import { saveLastSyncAt, loadLastSyncAt, renderLastSyncText, renderFirstRunNotice, isFirstRunOffline, formatSyncStamp } from './offline.js';
 
 export { getDbBaseUrl };
 
@@ -39,6 +43,7 @@ const S = {
   gen: 0,
   mode: 'idle',              // idle | stream | poll | offline | login | paused
   lastError: '',             // '' | network | login | server
+  netDown: false,            // navigator.onLine 은 true 지만 서버에 전혀 닿지 않음(기내 와이파이 등) → 오프라인과 같게 표시
   lastEventAt: 0,
   failures: 0,
   authRetry: 0,
@@ -63,30 +68,39 @@ export function isSyncReady() { return S.ready; }
 
 /** 테스트·디버그용 상태 */
 export function getSyncDebug() {
-  return { ready: S.ready, mode: S.mode, lastError: S.lastError, pending: core.queueCount(S.queue), queue: JSON.parse(JSON.stringify(S.queue)), streams: Object.keys(S.es).filter(k => S.es[k]).length, failures: S.failures };
+  return { ready: S.ready, mode: S.mode, lastError: S.lastError, netDown: S.netDown, offline: isOfflineNow(), lastSyncAt: lastSyncAt ? lastSyncAt.getTime() : null, pending: core.queueCount(S.queue), queue: JSON.parse(JSON.stringify(S.queue)), streams: Object.keys(S.es).filter(k => S.es[k]).length, failures: S.failures };
 }
 
 // ---------------- 마지막 동기화 시각 ----------------
-let lastSyncAt = null;
+// v2.5.0: 성공할 때마다 localStorage 에도 저장 → 앱을 새로 열어도(오프라인이어도) 마지막 동기화 시각을 보여 준다.
+let lastSyncAt = (() => { const v = loadLastSyncAt(); return v ? new Date(v) : null; })();
 export function getLastSyncAt() { return lastSyncAt; }
 function markSynced() {
   lastSyncAt = new Date();
-  const el = document.getElementById('lastSyncText');
-  if (el) {
-    const hh = String(lastSyncAt.getHours()).padStart(2, '0');
-    const mm = String(lastSyncAt.getMinutes()).padStart(2, '0');
-    el.innerText = `마지막 동기화 ${hh}:${mm}`;
-  }
+  S.netDown = false;
+  saveLastSyncAt(lastSyncAt.getTime());
+  renderLastSyncText(lastSyncAt.getTime(), { offline: false });
+}
+
+/** 지금 오프라인으로 봐야 하나: 브라우저 오프라인 · 오프라인 모드 · 서버에 전혀 닿지 않음 */
+function isOfflineNow() {
+  return (typeof navigator !== 'undefined' && navigator.onLine === false) || S.mode === 'offline' || S.netDown;
 }
 
 // ---------------- 배지 ----------------
 function refreshBadge() {
   const pending = core.queueCount(S.queue);
+  const offline = isOfflineNow();
+  const last = lastSyncAt ? lastSyncAt.getTime() : null;
+  // 첫 진입 안내: 이 폰에 근무표가 하나도 없고 서버에 닿지 못할 때
+  renderFirstRunNotice(isFirstRunOffline({ hasLocalSchedule: Object.keys(state.scheduleDB || {}).length > 0, offline, hasDbUrl: Boolean(getConfiguredDbUrl()) }));
   if (!getConfiguredDbUrl()) return renderSyncBadge({ status: 'local' });
+  renderLastSyncText(last, { offline });
+  // v2.5.0: 오프라인이 먼저 — 비행기모드에서 '로그인 필요'(토큰 문제)로 보이지 않게. 로그인이 안 된 폰이면 툴팁에만 알림.
+  if (offline) return renderSyncBadge({ status: 'offline', pending, lastSyncAt: last, needLogin: !fbIsLoggedIn() || S.lastError === 'login' });
   // 로그인 전에는 서버 응답(401)을 기다리지 않고 바로 '로그인 필요'를 보여 준다
   if (!fbIsLoggedIn()) return renderSyncBadge({ status: 'login', pending });
   if (S.mode === 'login' || S.lastError === 'login') return renderSyncBadge({ status: 'login', pending });
-  if (!navigator.onLine || S.mode === 'offline') return renderSyncBadge({ status: 'offline', pending });
   if (pending > 0 && (S.lastError === 'network' || !S.ready || (S.mode !== 'stream' && S.mode !== 'poll'))) {
     return renderSyncBadge({ status: 'pending', pending });
   }
@@ -390,6 +404,7 @@ async function onStreamFailure(gen) {
     const res = await fetch(buildDbUrl(getDbBaseUrl(), 'schedules', await getFbAuthQuery(), 'shallow=true'));
     status = res.status;
   } catch (e) { status = 0; }
+  S.netDown = status === 0; // 서버에 전혀 닿지 않음 → 배지는 '오프라인' (폴링·재시도는 계속)
   if (status === 401) {
     invalidateIdToken();
     if (S.authRetry < 1) {
@@ -425,9 +440,12 @@ function stopPolling() {
 /** schedules·anniversaries 를 한 번 통째로 받아 반영 → {status:'ok'|'login'|'error', updated} */
 async function fullFetch() {
   if (!getDbBaseUrl()) return { status: 'error', updated: false };
+  // 오프라인: 요청하지 않고 이 폰 저장분을 그대로 둔다 (덮어쓰기 없음)
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) { refreshBadge(); return { status: 'offline', updated: false }; }
   const before = JSON.stringify([state.scheduleDB, state.customAnniversaries]);
   const [rs, ra] = await Promise.all([dbGetJson('schedules'), dbGetJson('anniversaries')]);
   if (rs.status === 401 || ra.status === 401) { S.lastError = 'login'; S.mode = S.mode === 'stream' ? 'stream' : 'login'; refreshBadge(); return { status: 'login', updated: false }; }
+  if (rs.status === 0 && ra.status === 0) { S.netDown = true; refreshBadge(); return { status: 'offline', updated: false }; }
   if (!rs.ok || !ra.ok) { refreshBadge(); return { status: 'error', updated: false }; }
   onSchedulesIncoming([{ segs: [], value: rs.data }]);
   applyAnivOps([{ segs: [], value: ra.data }]);
@@ -462,8 +480,8 @@ export function initSync() {
   S.queue = core.loadQueue(safeGetStorage(SYNC_QUEUE_KEY, null));
   S.shadow = core.snapshotDB(state.scheduleDB);
   S.anivShadow = JSON.stringify(state.customAnniversaries);
-  window.addEventListener('online', () => resume());
-  window.addEventListener('offline', () => { closeStreams(); stopPolling(); S.mode = 'offline'; refreshBadge(); });
+  window.addEventListener('online', () => { S.netDown = false; resume(); });
+  window.addEventListener('offline', () => { closeStreams(); stopPolling(); clearTimeout(S.timers.flushRetry); S.mode = 'offline'; refreshBadge(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); else resume(); });
   refreshBadge();
   resume();
@@ -487,21 +505,37 @@ export function stopSync() {
   refreshBadge();
 }
 
-/** 한 번 통째로 받아오기 (수동 동기화·로그인 직후). isManual 이면 결과 알림 */
+/** 오프라인일 때 배지를 누르면 보여 줄 안내 */
+export function offlineManualSyncMessage(lastSyncAtMs, pending = 0) {
+  const when = lastSyncAtMs ? `마지막 동기화 ${formatSyncStamp(lastSyncAtMs)}` : '아직 동기화한 적 없음';
+  return `지금은 오프라인입니다 (${when}).\n이 폰에 저장된 근무표·사진을 보여 주고 있어요.` +
+    (pending > 0 ? `\n보낼 편집 ${pending}건은 인터넷이 연결되면 자동으로 보냅니다.` : '\n편집하면 인터넷이 연결될 때 자동으로 보냅니다.');
+}
+
+/**
+ * 한 번 통째로 받아오기 (수동 동기화·로그인 직후). isManual 이면 결과 알림
+ * 실패(오프라인·서버 오류·로그인)면 이 폰 근무표·기념일은 그대로 둔다(덮어쓰기 없음).
+ * @returns {Promise<'ok'|'offline'|'login'|'error'|'local'>}
+ */
 export async function loadFromFirebase(isManual = false) {
-  if (!getConfiguredDbUrl()) return;
+  if (!getConfiguredDbUrl()) return 'local';
   await flush();
   const r = await fullFetch();
+  if (r.status === 'offline') {
+    if (isManual) alert(offlineManualSyncMessage(lastSyncAt ? lastSyncAt.getTime() : null, core.queueCount(S.queue)));
+    return 'offline';
+  }
   if (r.status === 'login') {
     if (isManual) alert("동기화하려면 로그인이 필요합니다. 업로드 화면 > 동기화 '설정'에서 로그인해 주세요.");
-    return;
+    return 'login';
   }
   if (r.status === 'error') {
     if (isManual) alert('동기화 연결 실패: Firebase 규칙 및 네트워크를 확인해 주세요.');
-    return;
+    return 'error';
   }
   if (isManual) alert(r.updated ? '클라우드에서 최신 근무표와 기념일을 동기화했습니다!' : '이미 최신 동기화 상태입니다!');
   if (S.mode !== 'stream') startStreams();
+  return 'ok';
 }
 
 export function manualSyncNow() {

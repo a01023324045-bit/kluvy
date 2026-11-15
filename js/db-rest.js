@@ -2,6 +2,11 @@
 import { getConfiguredDbUrl } from './config.js';
 import { getFbAuthQuery, invalidateIdToken } from './auth.js';
 
+/** 브라우저가 오프라인이라고 알려 주는가 (navigator 가 없으면 온라인으로 봄) */
+export function isOffline() {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
 export function getDbBaseUrl() {
   const dbUrl = getConfiguredDbUrl();
   return dbUrl ? dbUrl.replace(/\/+$/, '') : '';
@@ -20,6 +25,8 @@ export function buildDbUrl(base, path, authQ, extraQuery = '') {
 export async function dbFetch(path, { method = 'GET', body, query = '' } = {}) {
   const base = getDbBaseUrl();
   if (!base) throw new Error('DB 주소 없음');
+  // v2.5.0: 오프라인(비행기모드)이면 요청 자체를 보내지 않는다 — 실패 로그·토큰 갱신 시도 없이 바로 '네트워크 오류'로 처리
+  if (isOffline()) throw new Error('오프라인');
   const init = { method };
   if (body !== undefined) {
     init.headers = { 'Content-Type': 'application/json' };

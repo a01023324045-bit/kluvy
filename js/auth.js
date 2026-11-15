@@ -20,12 +20,19 @@ export function getIdTokenExpiry() { return fbIdToken ? fbIdTokenExp : 0; }
 /** 서버가 토큰을 거부했을 때(401·auth_revoked) 캐시된 idToken 을 버려 다음 요청에서 새로 받게 한다. */
 export function invalidateIdToken() { fbIdToken = null; fbIdTokenExp = 0; }
 
+/** securetoken 400 응답의 오류 코드가 'refresh 토큰을 더는 못 씀'을 뜻하나 (그때만 토큰 삭제 → 로그인 필요) */
+export function isRefreshTokenRejected(code) {
+  return /TOKEN_EXPIRED|INVALID_REFRESH_TOKEN|USER_DISABLED|USER_NOT_FOUND|MISSING_REFRESH_TOKEN|INVALID_GRANT_TYPE|PROJECT_NUMBER_MISMATCH/.test(String(code || ''));
+}
+
 // REST 요청 URL 끝에 붙일 인증 쿼리. 로그인 전이면 빈 문자열.
 // opts.forceRefresh: 남은 시간과 관계없이 새 idToken 을 받는다 (스트림 선제 재연결용)
 export async function getFbAuthQuery(opts = {}) {
   const refresh = localStorage.getItem(STORAGE_KEYS.refreshToken);
   if (!FIREBASE_WEB_API_KEY || !refresh) return '';
   if (!opts.forceRefresh && fbIdToken && Date.now() < fbIdTokenExp - 60000) return `?auth=${encodeURIComponent(fbIdToken)}`;
+  // v2.5.0: 오프라인이면 토큰 서버에 묻지 않는다 (refresh 토큰은 그대로 → 온라인이 되면 이어서 동기화, '로그인 필요'로 오해하지 않게)
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return fbIdToken ? `?auth=${encodeURIComponent(fbIdToken)}` : '';
   if (!fbRefreshPromise) {
     fbRefreshPromise = (async () => {
       const res = await fetch(`${getAuthEndpoints().refresh}?key=${FIREBASE_WEB_API_KEY}`, {
@@ -34,11 +41,15 @@ export async function getFbAuthQuery(opts = {}) {
         body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refresh)}`
       });
       if (!res.ok) {
-        if (res.status === 400) { // 토큰 만료/폐기 → 재로그인 필요
+        // 토큰 만료/폐기(400 + Firebase 오류 코드)일 때만 재로그인 필요로 본다.
+        // v2.5.0: 기내 와이파이 로그인 페이지처럼 Firebase 가 아닌 곳이 400 을 돌려준 경우엔 토큰을 지우지 않는다.
+        let code = '';
+        try { const j = await res.json(); code = String((j && j.error && (j.error.message || j.error)) || ''); } catch (e) { code = ''; }
+        if (res.status === 400 && isRefreshTokenRejected(code)) {
           localStorage.removeItem(STORAGE_KEYS.refreshToken);
           onAuthInvalidated();
         }
-        throw new Error('토큰 갱신 실패: ' + res.status);
+        throw new Error('토큰 갱신 실패: ' + res.status + (code ? ' ' + code : ''));
       }
       const d = await res.json();
       fbIdToken = d.id_token;

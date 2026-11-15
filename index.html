@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="kluvy-version" content="2.4.7" />
+  <meta name="kluvy-version" content="2.5.0" />
   <title>KLUVY - 규호♥예진 근무표 & 데이트 플래너</title>
 
   <!-- PWA 홈 화면 및 단독 앱(Standalone) 설정 -->
@@ -12,16 +12,23 @@
   <meta name="apple-mobile-web-app-title" content="KLUVY" />
   <meta name="theme-color" content="#ffffff" />
   <link rel="apple-touch-icon" href="icon-512.png" />
+  <!-- 탭 아이콘도 앱 안 파일로 (없으면 브라우저가 /favicon.ico 를 찾다가 오프라인에서 실패 로그를 남김) -->
+  <link rel="icon" type="image/png" href="icon-512.png" />
   <link rel="manifest" href="manifest.json" />
 
   <!-- 서비스 워커 등록 스크립트 -->
   <script>
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
+      const registerSw = () => {
         // 앱을 열 때마다 새 버전(sw.js)이 있는지 바로 확인 → 업로드 후 다음 실행부터 새 파일 사용
         navigator.serviceWorker.register('./sw.js').then((reg) => reg.update()).catch((err) => {
           console.warn('PWA 서비스 워커 등록 실패:', err);
         });
+      };
+      window.addEventListener('load', () => {
+        // 오프라인(비행기모드)이면 이미 설치된 서비스 워커가 저장된 화면을 보여 주므로, 새 버전 확인은 연결된 뒤에 한다
+        if (navigator.onLine === false) window.addEventListener('online', registerSw, { once: true });
+        else registerSw();
       });
     }
   </script>
@@ -75,6 +82,13 @@
   </header>
 
   <main class="max-w-md mx-auto px-2.5 py-3 space-y-3">
+
+    <!-- v2.5.0 첫 진입 안내: 이 폰에 근무표가 하나도 없고 오프라인일 때 (빈 달력 대신) -->
+    <section id="offlineFirstRunNotice" role="status" aria-live="polite" class="hidden bg-amber-50 border border-amber-300 rounded-2xl px-4 py-3 text-amber-900">
+      <p class="font-bold text-[15px] flex items-center gap-2"><i class="fa-solid fa-plane-circle-xmark text-amber-600"></i>아직 이 폰에 저장된 근무표가 없습니다</p>
+      <p id="offlineFirstRunText" class="text-[14px] font-semibold mt-1">인터넷에 연결한 뒤 한 번 열어야 근무표를 내려받습니다.</p>
+      <p class="text-[13px] text-amber-800 mt-1">한 번 받아 두면 그다음부터는 비행기모드에서도 달력·상세·사진(이번 달과 다음 달)을 볼 수 있어요.</p>
+    </section>
 
     <!-- 색 안내 (범례): 근무 종류 = 색 (운영본과 같은 색), 사람 = 칸 안 위치 (윗줄 규호 · 아랫줄 예진) -->
     <section class="bg-white rounded-2xl px-3 py-2.5 shadow-sm border border-slate-200 space-y-1.5" aria-label="색 안내">

@@ -2,8 +2,22 @@
 // ⚠️ 앱 파일을 고치거나 새 파일을 추가하면:
 //   1) CACHE_VERSION 을 올리고  2) 새 파일을 ASSETS 에 추가할 것 (npm test 가 빠진 파일을 잡아낸다)
 // 전략: 앱 파일(html/js/css 등 같은 출처 GET)은 항상 network-first(+재검증) → 실패(오프라인) 시 캐시.
-//       Firebase·Google·CDN 등 다른 출처 요청과 GET 이 아닌 요청은 건드리지 않는다.
-const CACHE_VERSION = 'kluvy-v2.4.7';
+//       v2.5.0: 버전이 고정된 CDN 두 가지(Font Awesome 6.4.0 아이콘, SheetJS xlsx 0.18.5)만 따로 캐시(cache-first) →
+//       비행기모드에서도 아이콘이 보이고 엑셀 읽기가 된다. 그 밖의 다른 출처(Firebase·Google·AirLabs 등)와
+//       GET 이 아닌 요청은 건드리지 않는다 (근무표 데이터는 앱이 localStorage·IndexedDB 에 직접 보관).
+const CACHE_VERSION = 'kluvy-v2.5.0';
+// CDN 캐시: 주소에 버전이 박혀 있어 내용이 바뀌지 않으므로 앱 버전과 따로 둔다 (앱 업데이트 때 지우지 않음)
+const CDN_CACHE = 'kluvy-cdn-fa6.4.0-xlsx0.18.5';
+const FA_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/';
+const XLSX_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+const CDN_PREFIXES = [FA_BASE, 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/'];
+// 설치할 때 미리 받아 둘 CDN 파일 (index.html 의 link·script 와 같은 주소. 아이콘 글꼴은 solid·regular 만 씀)
+const CDN_PRECACHE = [
+  { url: FA_BASE + 'css/all.min.css', mode: 'cors' },
+  { url: FA_BASE + 'webfonts/fa-solid-900.woff2', mode: 'cors' },
+  { url: FA_BASE + 'webfonts/fa-regular-400.woff2', mode: 'cors' },
+  { url: XLSX_URL, mode: 'no-cors' }
+];
 
 const ASSETS = [
   './',
@@ -27,6 +41,7 @@ const ASSETS = [
   './js/db-rest.js',
   './js/sync-core.js',
   './js/firebase-sync.js',
+  './js/offline.js',
   './js/photo-store.js',
   './js/schedule-model.js',
   './js/holidays.js',
@@ -62,18 +77,28 @@ const ASSETS = [
 
 self.addEventListener('install', (e) => {
   // 파일 하나가 실패해도 설치 전체가 실패하지 않도록 개별 저장
-  e.waitUntil(
+  e.waitUntil(Promise.all([
     caches.open(CACHE_VERSION).then((cache) =>
       Promise.all(ASSETS.map((url) => cache.add(new Request(url, { cache: 'reload' })).catch(() => null)))
+    ),
+    // CDN: 이미 있으면 다시 받지 않는다 (버전 고정 주소). 실패해도 설치는 계속 (온라인일 때 쓰면서 채워짐)
+    caches.open(CDN_CACHE).then((cache) =>
+      Promise.all(CDN_PRECACHE.map(async ({ url, mode }) => {
+        try {
+          if (await cache.match(url)) return;
+          const res = await fetch(new Request(url, { mode, credentials: 'omit' }));
+          if (res && (res.ok || res.type === 'opaque')) await cache.put(url, res);
+        } catch (err) { /* 오프라인·차단 → 다음에 */ }
+      }))
     )
-  );
+  ]));
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k !== CACHE_VERSION && k !== CDN_CACHE).map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();
@@ -83,7 +108,11 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin) {
+    // 버전 고정 CDN 만 cache-first (나머지 다른 출처는 브라우저가 그대로 처리)
+    if (CDN_PREFIXES.some((p) => req.url.startsWith(p))) e.respondWith(cdnFirst(req));
+    return;
+  }
 
   // 페이지 이동(navigate)은 원래 요청 그대로(리다이렉트 처리 보존), 나머지 앱 파일은 HTTP 캐시를 재검증(no-cache)해서
   // 배포 직후 새 index.html 과 옛 js 가 섞이는 일을 막는다.
@@ -110,3 +139,12 @@ self.addEventListener('fetch', (e) => {
       })
   );
 });
+
+async function cdnFirst(req) {
+  const cache = await caches.open(CDN_CACHE);
+  const hit = await cache.match(req, { ignoreSearch: true });
+  if (hit) return hit;
+  const res = await fetch(req); // 실패(오프라인)면 그대로 네트워크 오류 — 캐시에 없던 파일
+  if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone()).catch(() => {});
+  return res;
+}

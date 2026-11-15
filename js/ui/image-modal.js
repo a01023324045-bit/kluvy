@@ -20,22 +20,35 @@ export async function fetchPhotoMeta(mKey) {
   return { ok: true, updatedAt: null, updatedBy: '', hasPhoto: null }; // 사진이 없거나 updatedAt 없는 아주 옛 사진 → 캐시 없을 때만 받아 봄
 }
 
-/** 이 달 사진: 캐시 → (서버가 더 새 것이면) 내려받아 캐시 갱신. 반환: dataURL 또는 null */
-export async function loadPhotoForMonth(mKey) {
+const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+
+/**
+ * 이 달 사진 동기화: 캐시 → (온라인이고 서버가 더 새 것이면) 내려받아 캐시 갱신.
+ * v2.5.0: 오프라인이면 요청 없이 캐시만 (비행기모드에서 콘솔 오류·대기 없음). 미리 받기(offline.js)도 이 함수를 쓴다.
+ * @returns {Promise<{data:string|null, action:'downloaded'|'cached'|'none'|'offline'|'error'}>}
+ */
+export async function syncPhotoForMonth(mKey) {
   const store = getPhotoBackend();
   let cached = null;
   try { cached = await store.get(mKey); } catch (e) { cached = null; }
-  if (!getDbBaseUrl()) return cached ? cached.data : null;
+  const fromCache = action => ({ data: cached ? cached.data : null, action: cached ? 'cached' : action });
+  if (!getDbBaseUrl()) return fromCache('none');
+  if (isOffline()) return { data: cached ? cached.data : null, action: 'offline' };
   const meta = await fetchPhotoMeta(mKey);
-  if (!meta.ok) return cached ? cached.data : null; // 오프라인 등 → 캐시
-  if (!needsDownload(cached, meta.updatedAt, meta.hasPhoto !== false)) return cached ? cached.data : null;
+  if (!meta.ok) return fromCache('error'); // 서버에 못 닿음 → 캐시
+  if (!needsDownload(cached, meta.updatedAt, meta.hasPhoto !== false)) return fromCache('none');
   const full = await dbGetJson(`images/${mKey}`);
   if (full.ok && full.data && isSafeImageDataUrl(full.data.data)) {
     const rec = { monthKey: mKey, data: full.data.data, who: meta.updatedBy || full.data.updatedBy || '', updatedAt: Number(meta.updatedAt ?? full.data.updatedAt ?? 0), source: 'server' };
     try { await store.put(rec); } catch (e) { console.warn('사진 캐시 저장 실패:', e); }
-    return rec.data;
+    return { data: rec.data, action: 'downloaded' };
   }
-  return cached ? cached.data : null;
+  return fromCache(full.ok ? 'none' : 'error');
+}
+
+/** 이 달 사진: 캐시 → (서버가 더 새 것이면) 내려받아 캐시 갱신. 반환: dataURL 또는 null */
+export async function loadPhotoForMonth(mKey) {
+  return (await syncPhotoForMonth(mKey)).data;
 }
 
 export async function openYejinImageModal() {
@@ -61,7 +74,9 @@ export async function openYejinImageModal() {
     imgTag.src = '';
     imgTag.classList.add('hidden');
     noImgAlert.classList.remove('hidden');
-    if (noImgText) noImgText.innerText = `${currentYear}년 ${currentMonth}월에 등록된 스케줄 원본 사진이 없습니다.`;
+    if (noImgText) noImgText.innerText = isOffline()
+      ? `오프라인이라 사진을 받을 수 없습니다. 이 폰에 저장된 ${currentYear}년 ${currentMonth}월 사진이 없어요 (인터넷에 연결된 상태에서 한 번 열면 저장됩니다).`
+      : `${currentYear}년 ${currentMonth}월에 등록된 스케줄 원본 사진이 없습니다.`;
   }
 }
 

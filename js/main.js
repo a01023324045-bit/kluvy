@@ -14,6 +14,8 @@ import { updateFbLoginUI } from './ui/login.js';
 import { handlers } from './handlers.js';
 import { getPhotoBackend, migrateLocalStoragePhotos } from './photo-store.js';
 import { isSafeImageDataUrl } from './escape.js';
+import { runPrefetch } from './offline.js';
+import { syncPhotoForMonth } from './ui/image-modal.js';
 
 // inline onclick 등에서 쓸 수 있도록 전역 노출
 Object.assign(window, handlers);
@@ -71,6 +73,14 @@ function runSeokMigration() {
   safeSetStorage(MIGRATION_KEY, { at: Date.now(), count: changed.length, dates: changed });
 }
 
+// v2.5.0 미리 받기: 서버 근무표를 받은 뒤(온라인) 이번 달 + 다음 달 사진을 IndexedDB 에 받아 둔다 → 비행기모드에서도 사진 보기.
+// 근무 데이터는 동기화가 schedules 전체를 받아 localStorage 에 두므로 다음 달도 이미 들어 있다. 10분에 한 번까지, 실패는 조용히.
+function prefetchForOffline() {
+  runPrefetch({ db: state.scheduleDB, syncPhoto: syncPhotoForMonth, online: () => navigator.onLine !== false })
+    .then(r => { if (r) console.info('오프라인용 미리 받기:', JSON.stringify(r.result)); })
+    .catch(e => console.info('미리 받기 건너뜀:', e && e.message));
+}
+
 function initApp() {
   try {
     initYearSelector();
@@ -82,9 +92,11 @@ function initApp() {
     console.error("초기화 예외 발생:", err);
   }
   // 서버 동기화: 미전송 대기열 전송 + 실시간 스트림 (화면이 보이고 온라인일 때)
-  runAfterFirstFullSync(() => { runSeokMigration(); refreshFlightTimes().catch(() => {}); });
+  runAfterFirstFullSync(() => { runSeokMigration(); refreshFlightTimes().catch(() => {}); prefetchForOffline(); });
   if (!getConfiguredDbUrl()) runSeokMigration(); // 서버를 안 쓰는 폰은 이 폰 사본만 보정
   initSync();
+  // 오래 오프라인이었다가 다시 연결되면(착륙 후 등) 미리 받기를 한 번 더 (10분 간격 제한은 runPrefetch 가 지킴)
+  window.addEventListener('online', () => setTimeout(prefetchForOffline, 5000));
   // v1 이 localStorage 에 넣어 둔 사진(base64)을 IndexedDB 로 옮기고 localStorage 에서 지운다 (한도 초과 방지)
   migrateLocalStoragePhotos(localStorage, getPhotoBackend(), isSafeImageDataUrl)
     .then(r => { if (r.moved.length) console.info('사진을 IndexedDB 로 옮김:', r.moved.join(', ')); })
