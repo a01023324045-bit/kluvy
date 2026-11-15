@@ -111,7 +111,15 @@ export function undoLastUpload() {
   clearUndo();
   saveDB(); // 바뀐 칸만 PATCH (기록은 이미 지워짐)
   try { renderCalendar(); updateDetailCard(); } catch (e) { console.warn('되돌린 뒤 화면 갱신 실패', e); }
-  const text = `↩️ 되돌렸습니다 (${restored.length}일)${skipped.length ? ` · 그 사이 바뀐 ${skipped.length}일은 그대로 둠` : ''}`;
+  // v2.5.3: 건너뛴 날짜를 함께 보여 준다(무엇이 남았는지 알 수 있게)
+  const dayLabel = (k) => {
+    const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(String(k || ''));
+    return m ? `${Number(m[1])}/${Number(m[2])}` : String(k || '');
+  };
+  const skippedText = skipped.length
+    ? ` · 그 사이 바뀐 ${skipped.length}일(${skipped.slice(0, 4).map(dayLabel).join('·')}${skipped.length > 4 ? ' 외' : ''})은 그대로 둠`
+    : '';
+  const text = `↩️ 되돌렸습니다 (${restored.length}일)${skippedText}`;
   showApplyBar({ text, tone: skipped.length ? 'warn' : 'info' }, { autoHideMs: 8000 });
   return { ok: true, restored, skipped };
 }

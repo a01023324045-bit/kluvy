@@ -16,6 +16,28 @@ export function onUndoCleared(fn) { listeners.add(fn); return () => listeners.de
 
 const clone = v => (v === undefined || v === null ? null : JSON.parse(JSON.stringify(v)));
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+// v2.5.3: 칸을 저장(saveDB)하면 updatedAt/updatedBy 가 새로 찍힌다.
+// 되돌리기 기록의 '반영 직후 값'은 저장 전에 뜬 값이라 그 두 필드가 달라,
+// 실제 내용은 그대로인데도 '그 사이 바뀐 날'로 잘못 건너뛰는 문제가 있었다.
+const stripMeta = (v) => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return v ?? null;
+  const { updatedAt, updatedBy, ...rest } = v;
+  return rest;
+};
+// JSON.stringify 는 키 순서에 민감하다. 서버에서 되돌아온 칸은 같은 내용이어도 키 순서가 달라져
+// '바뀐 날'로 오판되므로, 키를 정렬한 표준형으로 비교한다.
+const canon = (v) => {
+  if (v === null || v === undefined) return null;
+  if (Array.isArray(v)) return v.map(canon);
+  if (typeof v !== 'object') return v;
+  const out = {};
+  for (const k of Object.keys(v).sort()) {
+    if (k === 'updatedAt' || k === 'updatedBy') continue;
+    out[k] = canon(v[k]);
+  }
+  return out;
+};
+const sameContent = (a, b) => JSON.stringify(canon(a)) === JSON.stringify(canon(b));
 
 /** 반영 직전: 바뀔 칸들의 현재 값 { 'YYYY-MM-DD|my': 값|null } */
 export function captureBefore(db, rows) {
@@ -48,7 +70,8 @@ export function undoUploadRows(db, entries) {
   for (const e of entries || []) {
     const day = db[e.dateKey] && typeof db[e.dateKey] === 'object' ? db[e.dateKey] : null;
     const cur = day ? day[e.who] : null;
-    if (!same(cur, e.after)) { skipped.add(e.dateKey); continue; }
+    const okCur = sameContent(cur, e.after) || (Array.isArray(e.afters) && e.afters.some(a => sameContent(cur, a)));
+    if (!okCur) { skipped.add(e.dateKey); continue; }
     const d = day || {};
     if (e.before === null || e.before === undefined) delete d[e.who];
     else d[e.who] = clone(e.before);
@@ -69,8 +92,13 @@ export function mergeUndoEntries(oldEntries, newEntries) {
   const out = (oldEntries || []).map(e => ({ ...e }));
   for (const n of newEntries || []) {
     const hit = out.find(e => e.dateKey === n.dateKey && e.who === n.who);
-    if (hit) hit.after = n.after;
-    else out.push({ ...n });
+    if (hit) {
+      // 같은 칸이 여러 번 바뀌면(업로드 → 편명 다시 읽기) 중간 상태도 '우리가 만든 값'으로 인정한다.
+      // 그래야 그 사이 저장·동기화로 필드가 살짝 달라져도 되돌리기가 그 날을 건너뛰지 않는다.
+      const prev = Array.isArray(hit.afters) ? hit.afters : [hit.after];
+      hit.afters = prev.concat([n.after]);
+      hit.after = n.after;
+    } else out.push({ ...(Array.isArray(n.afters) ? n : { ...n, afters: [n.after] }) });
   }
   return out;
 }
