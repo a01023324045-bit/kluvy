@@ -507,8 +507,12 @@ export async function processUploadFiles(opts) {
 
 /** 앱 버전 표시: 모달을 열 때 현재 버전과 저장된 화면(캐시) 이름을 보여 준다 */
 export async function renderAppVersion() {
-  const el = document.getElementById('appVersionText');
+  const el0 = document.getElementById('appVersionText');
+  // 캐시 조회(비동기) 전에 버전을 먼저 보여 줘 '확인 중…'에 멈춰 보이지 않게 한다
+  const el = el0;
   if (!el) return;
+  el.textContent = `앱 버전 v${APP_VERSION}`;
+  el.className = 'help !mt-0';
   let cache = '';
   try {
     const keys = await caches.keys();
