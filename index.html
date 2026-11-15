@@ -601,6 +601,13 @@
           </div>
           <input type="file" id="backupFileInput" accept=".json,application/json" class="hidden" onchange="onBackupFileSelected()" />
           <p class="help">근무표·기념일 전체를 파일로 저장합니다(스케줄 사진 제외). 복원하면 이 폰과 서버(상대방 폰 포함)의 데이터가 백업 내용으로 바뀝니다.</p>
+
+          <div id="appVersionBox" class="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
+            <span id="appVersionText" class="help !mt-0">앱 버전 확인 중…</span>
+            <button type="button" id="btnCheckUpdate" onclick="checkForUpdate()" class="btn btn-line text-[12px] whitespace-nowrap">
+              <i class="fa-solid fa-rotate"></i>업데이트 확인
+            </button>
+          </div>
         </div>
       </div>
     </div>
