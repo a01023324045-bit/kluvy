@@ -6,7 +6,8 @@
 //   v2.3.0: 사람 구분은 운영본처럼 위치(규호 윗줄·예진 아랫줄), 근무 형태 색은 운영본 그대로 (app.css).
 //   data-kind(근무 계열)를 달아 두어 비교 도구가 클래스명이 아니라 내용으로 비교한다.
 // 캡처: captureCalendar() — 브라우저가 그린 그대로 찍는 modern-screenshot(SVG foreignObject, vendor/ 에 고정 버전 내장)
-import { BASE_LOVE_DATE } from '../config.js';
+import { BASE_LOVE_DATE, PREF_KEYS } from '../config.js';
+import { safeSetStorage } from '../storage.js';
 import { state } from '../state.js';
 import { getKSTDate, getDiffDays, makeDateKey, parseDateKey } from '../dates.js';
 import { HOLIDAYS } from '../holidays.js';
@@ -27,6 +28,15 @@ function el(tag, cls, text) {
   if (cls) e.className = cls;
   if (text !== undefined && text !== null) e.textContent = text;
   return e;
+}
+
+/**
+ * v2.5.2: 그 날의 기념일 표시 정보. 기념일 스위치가 꺼져 있으면 null → 달력 칸(★·이름)·상세 카드 태그가 한꺼번에 사라진다.
+ * 캡처는 화면(#calendarCaptureArea)을 그대로 찍으므로 별도 처리 없이 같이 빠진다. 기념일 데이터(state.customAnniversaries)는 건드리지 않는다.
+ */
+export function anniversaryFor(dateKey) {
+  if (state.showAnniversary === false) return null;
+  return getAnniversaryInfo(dateKey, state.customAnniversaries);
 }
 
 function todayKey() {
@@ -92,7 +102,7 @@ export function updateDetailCard() {
       t.append(el('i', 'fa-solid fa-flag mr-1'), document.createTextNode(holiday));
       tagsBox.appendChild(t);
     }
-    const aniv = getAnniversaryInfo(selectedDateKey, state.customAnniversaries);
+    const aniv = anniversaryFor(selectedDateKey);
     if (aniv) {
       const t = el('span', 'text-[12px] bg-amber-50 text-amber-800 border border-amber-200 font-semibold px-2 py-0.5 rounded-md');
       t.append(el('i', 'fa-solid fa-star mr-1'), document.createTextNode(aniv.name));
@@ -216,6 +226,7 @@ function timeLines(start, end) {
 
 export function renderCalendar() {
   updateDDayHeader();
+  paintAnnivButton();
   const { currentYear, currentMonth, selectedDateKey, showKyuho, showYejin } = state;
 
   const myTitle = document.getElementById('currentMonthYear');
@@ -240,7 +251,7 @@ export function renderCalendar() {
     const dateKey = makeDateKey(currentYear, currentMonth, day);
     const dayData = state.scheduleDB[dateKey] || { my: null, gf: null, date: null };
     const holidayName = HOLIDAYS[dateKey];
-    const aniv = getAnniversaryInfo(dateKey, state.customAnniversaries);
+    const aniv = anniversaryFor(dateKey);
 
     const cell = el('div', `calendar-cell cal-cell${selectedDateKey === dateKey ? ' is-selected' : ''}`);
     cell.dataset.date = dateKey;
@@ -337,6 +348,19 @@ function paintFilterButtons() {
     y.innerHTML = '';
     y.append(el('i', `fa-solid ${state.showYejin ? 'fa-plane' : 'fa-plane-slash'}`), document.createTextNode(' 이예진'));
   }
+}
+
+/** v2.5.2: 기념일 스위치 버튼 모양(켜짐/꺼짐)을 state 에 맞춘다 — 화면을 그릴 때마다 호출 (새로고침 뒤 저장된 설정 반영) */
+function paintAnnivButton() {
+  const a = document.getElementById('filterBtnAniv');
+  if (a) a.setAttribute('aria-pressed', String(state.showAnniversary !== false));
+}
+
+/** v2.5.2: [기념일] 스위치 — 달력 칸·상세 카드·캡처의 기념일 표시만 켜고 끈다 (데이터는 그대로). 설정은 이 폰에 저장 */
+export function toggleAnniversaryDisplay() {
+  state.showAnniversary = state.showAnniversary === false;
+  safeSetStorage(PREF_KEYS.showAnniversary, state.showAnniversary);
+  renderCalendar();
 }
 
 export function toggleScheduleFilter(target) {

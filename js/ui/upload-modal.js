@@ -9,7 +9,10 @@ import { makeDateKey, makeMonthKey } from '../dates.js';
 import { safeSetStorage } from '../storage.js';
 import { saveDB } from '../firebase-sync.js';
 import { renderCalendar, updateDetailCard } from '../render/calendar.js';
-import { compressImageFile, savePhotoForMonth, deleteLocalPhoto } from './image-modal.js';
+import { compressImageFile, savePhotoForMonth, deleteLocalPhoto, deleteServerPhoto, localPhotoKeys, syncPhotoForMonth, openYejinImageModal } from './image-modal.js';
+import { getPhotoBackend } from '../photo-store.js';
+import { isSafeImageDataUrl } from '../escape.js';
+import { describeCurrentFile, pruneFileHistory } from '../file-history.js';
 import { parseKyuhoWorkbookData } from '../parsers/excel-kyuho.js';
 import { applyQuickTextInput } from '../parsers/quick-text.js';
 import { recognizeYejinImage, buildYejinPreviewRows, readFileAsBase64 } from '../parsers/gemini-yejin.js';
@@ -133,14 +136,22 @@ export function onGeminiModelChanged() {
   inp.value = getGeminiModel();
 }
 
+/** 고른(아직 반영 전) 파일 이름 한 줄 — '현재 파일' 카드는 그대로 두고 그 아래에 따로 보여 준다 (v2.5.2) */
+function showSelectedFile(id, text) {
+  const e = document.getElementById(id);
+  if (!e) return;
+  e.textContent = text;
+  e.classList.toggle('hidden', !text);
+}
+
 export function onFileSelected(who) {
   if (who === 'kyuho') {
     const file = document.getElementById('kyuhoFile').files[0];
-    if (file) document.getElementById('kyuhoAppliedFileName').innerText = `선택됨: ${file.name}${isImageFile(file) ? ' (사진 → AI 인식)' : ''}`;
+    showSelectedFile('kyuhoSelectedFileName', file ? `선택됨: ${file.name}${isImageFile(file) ? ' (사진 → AI 인식)' : ''}` : '');
   } else if (who === 'yejin') {
     // 사진은 [변경사항 캘린더 반영] 때 한 번만 압축·업로드한다 (1단계: 여기서도 업로드해서 두 번 올라갔음)
     const file = document.getElementById('yejinImageFile').files[0];
-    if (file) document.getElementById('yejinAppliedFileName').innerText = `선택됨: ${file.name}`;
+    showSelectedFile('yejinSelectedFileName', file ? `선택됨: ${file.name}` : '');
   }
 }
 
@@ -190,10 +201,9 @@ export function setUploadTargetMonth(year, month) {
   document.getElementById('kyuhoFile').value = '';
   document.getElementById('yejinImageFile').value = '';
 
-  const mKey = makeMonthKey(year, month);
-  const hist = state.fileHistory[mKey] || {};
-  document.getElementById('kyuhoAppliedFileName').innerText = hist.kyuho || '등록된 파일 없음';
-  document.getElementById('yejinAppliedFileName').innerText = hist.yejin || '등록된 파일 없음';
+  showSelectedFile('kyuhoSelectedFileName', '');
+  showSelectedFile('yejinSelectedFileName', '');
+  renderCurrentFiles();
   const rs = document.getElementById('rereadFlightsStatus'); // v2.5.1: 달을 바꾸면 이전 [편명 다시 읽기] 결과 줄은 지움
   if (rs) { rs.textContent = ''; rs.classList.add('hidden'); }
 
@@ -222,24 +232,136 @@ export function updateUploadModalStatus() {
   document.getElementById('statusYejinMonthCount').innerText = yCount > 0 ? `${yCount}일 등록됨` : '미등록';
 }
 
-export function clearTargetMonthData() {
+// ---------------- 현재 파일 카드 (v2.5.2) ----------------
+// 주 글자 = '2026년 12월 예진 스케줄', 보조 글자 = 올린 파일 이름, 예진은 실제 사진 썸네일. 예전에는 파일 이름만 보였다.
+// 사진(예진)·근무 데이터(규호)가 그 달에 실제로 없으면 파일 이름이 남아 있어도 '등록된 사진 없음' — 다른 달에 쌓인 이름이 보이지 않게.
+let currentFilesToken = 0;
+
+/** 그 달에 규호 근무 칸이 있는 날 수 */
+function kyuhoDaysInMonth(year, month) {
+  const total = new Date(year, month, 0).getDate();
+  let n = 0;
+  for (let d = 1; d <= total; d++) {
+    const t = state.scheduleDB[makeDateKey(year, month, d)]?.my?.type;
+    if (t && t !== '-') n++;
+  }
+  return n;
+}
+
+function paintKyuhoCurrent(year, month) {
+  const mKey = makeMonthKey(year, month);
+  const info = describeCurrentFile({ who: 'kyuho', year, month, fileName: (state.fileHistory[mKey] || {}).kyuho || '', hasData: kyuhoDaysInMonth(year, month) > 0 });
+  const box = document.getElementById('kyuhoCurrentFile');
+  if (!box) return;
+  box.dataset.state = info.empty ? 'empty' : info.kind;
+  document.getElementById('kyuhoCurLabel').textContent = info.empty ? info.emptyText : info.label;
+  document.getElementById('kyuhoAppliedFileName').textContent = info.sub; // 비면 CSS 로 숨김 (:empty)
+  const icon = document.querySelector('#kyuhoCurThumb i');
+  if (icon) icon.className = `fa-solid ${info.kind === 'image' ? 'fa-file-image' : info.kind === 'excel' ? 'fa-file-excel' : info.kind === 'data' ? 'fa-calendar-days' : 'fa-file'}`;
+}
+
+function paintYejinCurrent(year, month, photoData) {
+  const mKey = makeMonthKey(year, month);
+  const has = typeof photoData === 'string' && isSafeImageDataUrl(photoData);
+  const info = describeCurrentFile({ who: 'yejin', year, month, fileName: (state.fileHistory[mKey] || {}).yejin || '', hasPhoto: has });
+  const box = document.getElementById('yejinCurrentFile');
+  if (!box) return;
+  box.dataset.state = info.empty ? 'empty' : 'photo';
+  document.getElementById('yejinCurLabel').textContent = info.empty ? info.emptyText : info.label;
+  document.getElementById('yejinAppliedFileName').textContent = info.sub;
+  const img = document.getElementById('yejinCurThumbImg');
+  const icon = document.getElementById('yejinCurThumbIcon');
+  const btn = document.getElementById('yejinCurThumb');
+  if (has) { img.src = photoData; img.alt = `${info.label} 사진`; } else { img.removeAttribute('src'); img.alt = ''; }
+  img.classList.toggle('hidden', !has);
+  icon.classList.toggle('hidden', has);
+  btn.disabled = !has;
+  btn.setAttribute('aria-label', has ? `${info.label} 사진 크게 보기` : '등록된 사진 없음');
+  document.getElementById('yejinCurViewBtn').classList.toggle('hidden', !has);
+}
+
+/**
+ * 예전에 잘못 쌓였거나 가짜인 파일 이름을 정리한다 (사진·근무 데이터가 실제로 없는 달·사람의 이름).
+ * 지금 막 바뀐 값을 덮지 않도록 '정리 대상으로 찍힌 이름이 아직 그대로인 것'만 지운다. 저장만 하고 서버·되돌리기 기록은 건드리지 않는다.
+ */
+export async function pruneStaleFileHistory() {
+  const photoKeys = await localPhotoKeys();
+  const { removed } = pruneFileHistory(state.fileHistory, {
+    photoKeys,
+    monthHasKyuho: k => kyuhoDaysInMonth(Number(k.slice(0, 4)), Number(k.slice(5, 7))) > 0
+  });
+  let changed = false;
+  for (const r of removed) {
+    const e = state.fileHistory[r.monthKey];
+    if (e && e[r.who] === r.name) { delete e[r.who]; changed = true; if (!e.kyuho && !e.yejin) delete state.fileHistory[r.monthKey]; }
+  }
+  if (changed) safeSetStorage(STORAGE_KEYS.fileHistory, state.fileHistory);
+  return removed;
+}
+
+/**
+ * 고른 달(state.uploadTargetYear/Month)의 두 '현재 파일' 카드를 그린다.
+ * 규호는 바로, 예진은 ① 이 폰 캐시 → ② 서버 확인(상대 폰이 올린 사진·더 새 사진) 순으로 그린다. 달을 바꾸면 늦게 온 결과는 버린다.
+ * 마지막에 사진·근무 데이터가 없는 달의 낡은 파일 이름을 정리한다.
+ */
+export function renderCurrentFiles() {
+  const year = state.uploadTargetYear;
+  const month = state.uploadTargetMonth;
+  const mKey = makeMonthKey(year, month);
+  const token = ++currentFilesToken;
+  paintKyuhoCurrent(year, month);
+  const box = document.getElementById('yejinCurrentFile');
+  if (box) box.dataset.state = 'loading';
+  document.getElementById('yejinCurLabel').textContent = '사진 확인 중…';
+  document.getElementById('yejinAppliedFileName').textContent = '';
+  document.getElementById('yejinCurThumb').disabled = true;
+  return (async () => {
+    let data = null;
+    try { data = (await getPhotoBackend().get(mKey))?.data ?? null; } catch (e) { data = null; }
+    if (token !== currentFilesToken) return;
+    paintYejinCurrent(year, month, data);
+    try {
+      data = (await syncPhotoForMonth(mKey)).data; // 오프라인이면 요청 없이 캐시만
+      if (token !== currentFilesToken) return;
+      paintYejinCurrent(year, month, data);
+    } catch (e) { console.warn('사진 확인 실패:', e); }
+    await pruneStaleFileHistory();
+    if (token !== currentFilesToken) return;
+    paintKyuhoCurrent(year, month);
+    paintYejinCurrent(year, month, data);
+  })();
+}
+
+/** 등록 창에서 고른 달의 사진을 사진 뷰어로 크게 보기 (달력에서 보는 달이 아니라 이 창의 대상 달) */
+export function openUploadTargetPhoto() {
+  return openYejinImageModal(state.uploadTargetYear, state.uploadTargetMonth);
+}
+
+/**
+ * [해당 월 비우기]: 그 달 근무 칸 + 파일 이름 + 예진 사진(이 폰 캐시 + 서버)을 함께 지운다.
+ * 서버 사진을 남기면 등록 창·사진 보기가 서버에서 다시 받아 와 '비웠는데 사진이 되살아나는' 일이 생긴다.
+ */
+export async function clearTargetMonthData() {
   const { uploadTargetYear, uploadTargetMonth } = state;
-  if (confirm(`${uploadTargetYear}년 ${uploadTargetMonth}월의 근무 데이터를 비우시겠습니까?`)) {
+  if (confirm(`${uploadTargetYear}년 ${uploadTargetMonth}월의 근무 데이터와 등록된 사진을 비우시겠습니까?`)) {
     const totalDays = new Date(uploadTargetYear, uploadTargetMonth, 0).getDate();
     for (let d = 1; d <= totalDays; d++) {
       delete state.scheduleDB[makeDateKey(uploadTargetYear, uploadTargetMonth, d)];
     }
     const mKey = makeMonthKey(uploadTargetYear, uploadTargetMonth);
     delete state.fileHistory[mKey];
-    deleteLocalPhoto(mKey);
 
     saveDB();
     renderCalendar();
+    await deleteLocalPhoto(mKey);
+    const serverOk = await deleteServerPhoto(mKey); // true 삭제 · false 실패 · null 서버 안 씀
+    // 비운 직후 같은 달을 보고 있다면 (confirm·await 사이에 달을 바꿨을 수 있어 현재 대상 달로) 카드를 다시 그린다
     updateUploadModalStatus();
-    setUploadTargetMonth(uploadTargetYear, uploadTargetMonth);
-    alert(`${uploadTargetYear}년 ${uploadTargetMonth}월 데이터가 초기화되었습니다.`);
+    setUploadTargetMonth(state.uploadTargetYear, state.uploadTargetMonth);
+    alert(`${uploadTargetYear}년 ${uploadTargetMonth}월 데이터가 초기화되었습니다.` + (serverOk === false ? '\n※ 서버의 사진은 지우지 못했습니다(인터넷 연결 확인). 연결된 뒤 [해당 월 비우기]를 한 번 더 눌러 주세요.' : ''));
   }
 }
+
 
 /** 엑셀 파일 → { 날짜: my } (반영은 하지 않음). 오류는 콘솔에만 남기고 빈 결과 (운영본 동작) */
 export function readKyuhoExcel(file, year, month) {
@@ -373,14 +495,12 @@ export async function processUploadFiles(opts) {
     }
 
     // ---- 사진이 있는데 API 키가 없음 ----
+    // v2.5.2: 키가 없으면 사진이 몇 월 것인지 읽을 수 없다. 예전에는 '선택한 달'(mKey)에 사진·파일 이름을 저장했는데,
+    //   키가 있는 반영 경로(commitUpload)는 '사진에서 읽은 달'에 저장해서 같은 사진이 서로 다른 달에 쌓이고, 선택한 달의 진짜 사진을 덮어쓰기도 했다.
+    //   → 달을 확인할 수 없는 경우에는 사진도 이름도 저장하지 않는다 (저장은 항상 사진에서 읽은 달 한 곳, commitUpload).
     if ((kIsImage || yFile) && !apiKey) {
       if (yFile && !kIsImage) {
-        const compressed = await compressImageFile(yFile);
-        await savePhotoForMonth(mKey, compressed);
-        if (!state.fileHistory[mKey]) state.fileHistory[mKey] = {};
-        state.fileHistory[mKey].yejin = yFile.name;
-        safeSetStorage(STORAGE_KEYS.fileHistory, state.fileHistory);
-        alert("사진 자동인식을 위해 Gemini API 키를 입력해 주세요. (사진은 원본급으로 보관되었습니다)");
+        alert('사진 속 달을 읽으려면 Gemini API 키가 필요합니다. [설정]에서 키를 입력한 뒤 다시 [반영]을 눌러 주세요.\n(키 없이는 사진을 저장하지 않습니다 — 엉뚱한 달에 저장되는 것을 막기 위해서입니다.)');
       } else {
         alert('규호 근무표 사진을 읽으려면 Gemini API 키가 필요합니다. [설정]에서 키를 입력해 주세요.');
       }

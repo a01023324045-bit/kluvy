@@ -13,6 +13,8 @@ export const state = {
 
   showKyuho: true,
   showYejin: true,
+  /** v2.5.2: 기념일 표시 (끄면 달력 칸·상세 카드·캡처에서 숨김, 기념일 데이터는 그대로). 이 폰 localStorage 에 저장 */
+  showAnniversary: true,
   currentEditMode: 'single',
   currentImgScale: 1.0,
 

@@ -51,8 +51,14 @@ export async function loadPhotoForMonth(mKey) {
   return (await syncPhotoForMonth(mKey)).data;
 }
 
-export async function openYejinImageModal() {
-  const { currentYear, currentMonth } = state;
+/**
+ * 사진 뷰어 열기. 인자가 없으면 달력에서 보는 달, (year, month) 를 주면 그 달 — 등록 창에서 고른 달의 사진을 볼 때 쓴다 (v2.5.2).
+ * ⚠️ HTML 의 onclick="openYejinImageModal()" 은 인자 없이 부른다. 숫자가 아닌 값(이벤트 등)은 무시하고 달력의 달.
+ */
+export async function openYejinImageModal(year, month) {
+  const useGiven = Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12;
+  const currentYear = useGiven ? year : state.currentYear;
+  const currentMonth = useGiven ? month : state.currentMonth;
   const mKey = makeMonthKey(currentYear, currentMonth);
   const modalTitle = document.getElementById('yejinImageModalTitle');
   const imgTag = document.getElementById('yejinOriginalImgTag');
@@ -171,8 +177,29 @@ export async function compressAndStoreYejinImage(file, mKey) {
   return compressed;
 }
 
+/**
+ * 서버의 해당 달 사진·메타 삭제 (루트 PATCH 1회, null = 삭제). '해당 월 비우기' 에서 이 폰 캐시와 함께 지운다 —
+ * 서버 사진을 남기면 사진 보기·등록 창이 서버 사진을 다시 받아 와서 '비웠는데 사진이 되살아나는' 문제가 생긴다.
+ * @returns {Promise<boolean|null>} true 삭제됨 · false 실패(서버 오류·오프라인) · null 서버를 안 쓰는 폰
+ */
+export async function deleteServerPhoto(mKey) {
+  if (!getDbBaseUrl()) return null;
+  try {
+    const res = await dbFetch('', { method: 'PATCH', body: { [`images/${mKey}`]: null, [`kluvyMeta/images/${mKey}`]: null } });
+    return res.ok;
+  } catch (e) {
+    console.warn('서버 사진 삭제 실패:', e);
+    return false;
+  }
+}
+
 /** 이 폰의 해당 달 사진 캐시 삭제 ('해당 월 비우기') */
 export async function deleteLocalPhoto(mKey) {
   try { localStorage.removeItem(`${LEGACY_PHOTO_PREFIX}${mKey}`); } catch (e) { /* */ }
   try { await getPhotoBackend().delete(mKey); } catch (e) { /* */ }
+}
+
+/** 이 폰의 사진 캐시가 가진 달 키 목록 (등록 창의 '실제로 사진이 있는 달' 판단용) */
+export async function localPhotoKeys() {
+  try { return await getPhotoBackend().keys(); } catch (e) { return []; }
 }

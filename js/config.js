@@ -11,6 +11,11 @@ export const STORAGE_KEYS = Object.freeze({
   geminiKey: 'gemini_api_key'
 });
 
+// v2.5.2: 이 폰에만 저장하는 화면 설정 (서버·백업으로 가지 않음). STORAGE_KEYS(운영 폰 호환 고정) 와 따로 둔다.
+export const PREF_KEYS = Object.freeze({
+  showAnniversary: 'kluvy_show_anniversary' // 'true' | 'false' — 달력·상세 카드·캡처에 기념일을 보일지 (기본 true)
+});
+
 export const DEFAULT_FIREBASE_URL = "https://yktable-f14fe-default-rtdb.asia-southeast1.firebasedatabase.app/";
 
 // Firebase 콘솔 > 프로젝트 설정 > 일반 > "웹 API 키" (공개돼도 되는 식별자, 비밀 아님)
@@ -88,4 +93,4 @@ export function getGeminiModelsEndpoint(apiKey) {
 }
 
 /** 화면에 보여 줄 앱 버전 (sw.js CACHE_VERSION 과 함께 표시) */
-export const APP_VERSION = '2.5.1';
+export const APP_VERSION = '2.5.2';

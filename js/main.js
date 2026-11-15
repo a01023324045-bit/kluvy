@@ -1,5 +1,5 @@
 // 앱 시작점
-import { DEFAULT_FIREBASE_URL, STORAGE_KEYS } from './config.js';
+import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, PREF_KEYS } from './config.js';
 import { safeGetStorage, safeSetStorage } from './storage.js';
 import { state } from './state.js';
 import { setOnAuthInvalidated } from './auth.js';
@@ -15,6 +15,7 @@ import { handlers } from './handlers.js';
 import { getPhotoBackend, migrateLocalStoragePhotos } from './photo-store.js';
 import { isSafeImageDataUrl } from './escape.js';
 import { runPrefetch } from './offline.js';
+import { removeLegacySeedHistory } from './file-history.js';
 import { syncPhotoForMonth } from './ui/image-modal.js';
 
 // inline onclick 등에서 쓸 수 있도록 전역 노출
@@ -45,12 +46,11 @@ function loadLocalData() {
   // 이 폰에 근무표가 없던 상태(새 폰·캐시 삭제)라면 서버에서 한 번 받기 전에는 아무것도 업로드하지 않는다.
   initSyncGuard(Object.keys(state.scheduleDB).length > 0);
 
-  state.fileHistory = safeGetStorage(STORAGE_KEYS.fileHistory, {
-    "2026-10": { kyuho: "교대근무표 10월.xlsx", yejin: "2610.png" },
-    "2026-09": { kyuho: "교대근무표 9월.xlsx", yejin: "2609.png" },
-    "2026-08": { kyuho: "교대근무표 8월.xlsx", yejin: "2608.jpg" },
-    "2026-07": { kyuho: "교대근무표 7월.xlsx", yejin: "2607.jpg" }
-  });
+  // v2.5.2: 예전에는 여기에 가짜 파일 이름(2610.png 등)을 기본값으로 넣었다 → 업로드한 적 없는 달에도 '현재 파일'로 보였다.
+  //   이제 기본값은 비어 있고, 이미 저장돼 있는 그 가짜 이름은 정리한다(sanitizeFileHistory). 사진·근무 데이터에 맞춰 보여 주는 쪽은 등록 창이 정한다.
+  state.fileHistory = removeLegacySeedHistory(safeGetStorage(STORAGE_KEYS.fileHistory, {}));
+  // v2.5.2: 기념일 표시 설정 (기본 켜짐)
+  state.showAnniversary = safeGetStorage(PREF_KEYS.showAnniversary, true) !== false;
 
   state.customAnniversaries = safeGetStorage(STORAGE_KEYS.anniversaries, [
     { name: "규호 생일", date: "2026-05-18", isRepeat: true },
