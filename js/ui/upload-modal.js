@@ -19,6 +19,8 @@ import { openRecognizePreview } from './recognize-preview.js';
 import { showApplyBar } from './apply-bar.js';
 import { captureBefore, diffEntries, saveUndo } from '../upload-undo.js';
 import { buildApplySummary } from '../apply-summary.js';
+import { flightStatsForMonth } from '../flight-stats.js';
+import { rememberUploadedPhoto } from './reread-flights.js';
 import { planUploadRows, applyUploadRows, rowsFromMyMap, rowsFromGfDb, dedupeRows } from '../upload-merge.js';
 import { normalizeFlight, sourceLabel, findFlightEntry } from '../flight.js';
 import { refreshFlightTimes, fillFromFlightTable, getFlightTable, learnFlightFromGf, getAirlabsKey, setAirlabsKey, airlabsUsageText, pingAirlabs } from '../flight-times.js';
@@ -192,6 +194,8 @@ export function setUploadTargetMonth(year, month) {
   const hist = state.fileHistory[mKey] || {};
   document.getElementById('kyuhoAppliedFileName').innerText = hist.kyuho || '등록된 파일 없음';
   document.getElementById('yejinAppliedFileName').innerText = hist.yejin || '등록된 파일 없음';
+  const rs = document.getElementById('rereadFlightsStatus'); // v2.5.1: 달을 바꾸면 이전 [편명 다시 읽기] 결과 줄은 지움
+  if (rs) { rs.textContent = ''; rs.classList.add('hidden'); }
 
   updateUploadModalStatus();
 }
@@ -313,14 +317,18 @@ async function commitUpload(ctx, finalRows) {
     if (!state.fileHistory[k]) state.fileHistory[k] = {};
     state.fileHistory[k].yejin = yFile.name;
     await savePhotoForMonth(k, compressedYejin); // 사진 업로드는 여기서 한 번만
+    rememberUploadedPhoto(k, compressedYejin); // v2.5.1: [편명 다시 읽기] 가 같은 압축 사진을 다시 쓴다
   }
   // 확정된 비행 근무에서 편명 시각을 배운다 (두 폰 공유 시간표)
   for (const r of finalRows) if (r.who === 'gf') learnFlightFromGf(r.value, 'schedule');
 
-  const summary = buildApplySummary({ entries, planned, finalRows, warns, fails });
+  // v2.5.1: 예진 사진을 읽었으면 그 달 편명 통계 (편명이 비는 문제를 요약에 드러냄) — 달력에 실제 들어 있는 값 기준
+  const flightStats = yFile && yejinMonth ? flightStatsForMonth(state.scheduleDB, yejinMonth.year, yejinMonth.month) : null;
+  const summary = buildApplySummary({ entries, planned, finalRows, warns, fails, flightStats });
+  const reread = summary.needsReread && yejinMonth ? { year: yejinMonth.year, month: yejinMonth.month } : null;
   const aniv = JSON.parse(JSON.stringify(state.customAnniversaries || []));
   saveDB(); // 이전 되돌리기 기록은 여기서 지워진다 → 이번 기록을 그 다음에 저장
-  const undoable = saveUndo({ entries, aniv, text: summary.text, tone: summary.tone, details: summary.details });
+  const undoable = saveUndo({ entries, aniv, text: summary.text, tone: summary.tone, details: summary.details, reread });
   state.uploadTargetYear = shown.year;
   state.uploadTargetMonth = shown.month;
   state.currentYear = shown.year;
@@ -328,7 +336,7 @@ async function commitUpload(ctx, finalRows) {
   state.selectedDateKey = makeDateKey(shown.year, shown.month, 1);
   renderCalendar();
   closeUploadModal();
-  showApplyBar(summary, { undoable });
+  showApplyBar(summary, { undoable, reread });
   return summary;
 }
 

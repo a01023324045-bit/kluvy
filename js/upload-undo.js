@@ -61,6 +61,20 @@ export function undoUploadRows(db, entries) {
   return { restored: [...restored].sort(), skipped: [...skipped].sort() };
 }
 
+/**
+ * v2.5.1: 이미 있는 되돌리기 기록(업로드)에 이어서 [편명 다시 읽기] 가 바꾼 칸을 합친다.
+ *  - 같은 칸이면 '반영 직전 값(before)'은 맨 처음 것, '반영 직후 값(after)'은 최신 것 → [되돌리기] 한 번에 업로드 전으로 돌아간다.
+ */
+export function mergeUndoEntries(oldEntries, newEntries) {
+  const out = (oldEntries || []).map(e => ({ ...e }));
+  for (const n of newEntries || []) {
+    const hit = out.find(e => e.dateKey === n.dateKey && e.who === n.who);
+    if (hit) hit.after = n.after;
+    else out.push({ ...n });
+  }
+  return out;
+}
+
 function store() {
   try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch (e) { return null; }
 }

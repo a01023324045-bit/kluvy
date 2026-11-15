@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="kluvy-version" content="2.5.0" />
+  <meta name="kluvy-version" content="2.5.1" />
   <title>KLUVY - 규호♥예진 근무표 & 데이트 플래너</title>
 
   <!-- PWA 홈 화면 및 단독 앱(Standalone) 설정 -->
@@ -527,6 +527,9 @@
           </div>
           <input type="file" id="yejinImageFile" onchange="onFileSelected('yejin')" accept="image/*" class="block w-full text-[13px] text-slate-600 file:mr-2 file:min-h-[40px] file:px-3 file:rounded-lg file:border-0 file:text-[13px] file:font-semibold file:bg-rose-600 file:text-white" />
           <div class="text-right"><button type="button" onclick="previewUploadFiles()" class="preview-first-link" data-preview-link="yejin">결과 먼저 보기</button></div>
+          <!-- v2.5.1: 이미 등록한 달의 편명이 비었을 때 — 저장된 사진으로 편명만 다시 읽음 (사진을 다시 고를 필요 없음) -->
+          <div class="text-right"><button type="button" id="btnRereadFromModal" onclick="rereadFlightsFromModal()" class="preview-first-link" data-reread-link="yejin">이 달 편명만 다시 읽기</button></div>
+          <p id="rereadFlightsStatus" class="help hidden" role="status" aria-live="polite"></p>
 
           <div class="pt-1 border-t border-slate-100">
             <div class="flex items-center justify-between">
@@ -755,6 +758,7 @@
     <div class="apply-bar__inner">
       <p id="applyBarText" class="apply-bar__text"></p>
       <div class="apply-bar__btns">
+        <button type="button" id="btnRereadFlights" onclick="rereadFlights()" class="apply-bar__btn apply-bar__btn--reread hidden">편명 다시 읽기</button>
         <button type="button" id="btnApplyDetail" onclick="toggleApplyDetails()" class="apply-bar__btn hidden">자세히</button>
         <button type="button" id="btnUndoUpload" onclick="undoLastUpload()" class="apply-bar__btn apply-bar__btn--undo hidden"><i class="fa-solid fa-rotate-left"></i> 되돌리기</button>
         <button type="button" id="btnApplyClose" onclick="dismissApplyBar()" class="apply-bar__close" aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>

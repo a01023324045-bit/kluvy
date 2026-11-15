@@ -19,6 +19,7 @@ import {
   onAirlabsKeyChanged, checkAirlabsConnection, checkForUpdate, previewUploadFiles
 } from './ui/upload-modal.js';
 import { undoLastUpload, dismissApplyBar, toggleApplyDetails } from './ui/apply-bar.js';
+import { rereadFlightsFromBar, rereadFlightsFromModal } from './ui/reread-flights.js';
 import { cancelRecognizePreview, applyRecognizePreview } from './ui/recognize-preview.js';
 import { fbLoginFromForm, fbLogout } from './ui/login.js';
 import { downloadBackup, openRestorePicker, onBackupFileSelected } from './ui/backup-ui.js';
@@ -40,6 +41,8 @@ export const handlers = {
   previewUploadFiles, cancelRecognizePreview, applyRecognizePreview,
   // 바로 반영 결과 바 · 되돌리기 (v2.4.6)
   undoLastUpload, dismissApplyBar, toggleApplyDetails,
+  // 편명 다시 읽기 (v2.5.1): 요약 바 버튼(rereadFlights) · 등록 창 링크(rereadFlightsFromModal)
+  rereadFlights: rereadFlightsFromBar, rereadFlightsFromModal,
   // 로그인
   fbLoginFromForm, fbLogout,
   // 백업 / 복원

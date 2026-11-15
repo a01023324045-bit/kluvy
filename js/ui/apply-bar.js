@@ -41,12 +41,42 @@ export function showApplyBar(s, opt = {}) {
   $('btnApplyDetail').classList.toggle('hidden', !details.length);
   $('btnApplyDetail').textContent = '자세히';
   $('btnUndoUpload').classList.toggle('hidden', !opt.undoable);
+  setRereadButton(opt.reread);
   if (opt.undoable) {
     // 10분이 지나면 스스로 사라진다 (다른 화면에서 오래 켜 둬도)
     const left = undoRemainingMs();
     expireTimer = setTimeout(() => { clearUndo(); hideApplyBar(); }, Math.max(1000, left));
   }
   if (opt.autoHideMs) infoTimer = setTimeout(hideApplyBar, opt.autoHideMs);
+}
+
+/**
+ * v2.5.1: [편명 다시 읽기] 버튼 — 편명 없는 비행일이 있을 때만 보인다.
+ * @param {{year:number, month:number}|null|undefined} target 다시 읽을 달 (없으면 숨김)
+ */
+export function setRereadButton(target) {
+  const b = $('btnRereadFlights');
+  if (!b) return;
+  const on = Boolean(target && target.year && target.month);
+  b.classList.toggle('hidden', !on);
+  b.disabled = false;
+  b.textContent = '편명 다시 읽기';
+  if (on) { b.dataset.year = String(target.year); b.dataset.month = String(target.month); } else { delete b.dataset.year; delete b.dataset.month; }
+}
+
+/** 읽는 동안 버튼을 잠근다 */
+export function setRereadBusy(busy) {
+  const b = $('btnRereadFlights');
+  if (!b) return;
+  b.disabled = Boolean(busy);
+  b.textContent = busy ? '읽는 중…' : '편명 다시 읽기';
+}
+
+/** 바에 붙은 [편명 다시 읽기] 의 대상 달 (없으면 null) */
+export function rereadTargetFromBar() {
+  const b = $('btnRereadFlights');
+  if (!b || !b.dataset.year) return null;
+  return { year: Number(b.dataset.year), month: Number(b.dataset.month) };
 }
 
 export function hideApplyBar() {
@@ -90,5 +120,5 @@ export function undoLastUpload() {
 export function initApplyBar() {
   onUndoCleared(() => { if (showingUndo) hideApplyBar(); });
   const rec = loadUndo();
-  if (rec) showApplyBar({ text: rec.text || '✅ 반영했습니다', tone: rec.tone, details: rec.details }, { undoable: true });
+  if (rec) showApplyBar({ text: rec.text || '✅ 반영했습니다', tone: rec.tone, details: rec.details }, { undoable: true, reread: rec.reread });
 }

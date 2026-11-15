@@ -307,3 +307,9 @@ textarea.field { height: auto; padding: 8px 10px; line-height: 1.45; }
 .apply-bar__details { flex-basis: 100%; font-size: 13px; line-height: 1.5; padding: 6px 4px 2px 18px; list-style: disc; font-weight: var(--kv-w-body); }
 .preview-first-link { font-size: 13px; color: #4338ca; font-weight: var(--kv-w-strong); text-decoration: underline; min-height: 36px; padding: 0 4px; }
 .preview-first-link:active { color: #312e81; }
+/* v2.5.1: [편명 다시 읽기] — 반영 요약 바 버튼 (편명 없는 비행일이 있을 때만 보임) */
+.apply-bar__btn--reread { background: #fff; text-decoration: none; border: 1px solid currentColor; }
+.apply-bar__btn--reread.hidden { display: none; }
+.apply-bar__btn--reread:disabled { opacity: .6; }
+.apply-bar__btns { flex-wrap: wrap; justify-content: flex-end; }
+.apply-bar__details { max-height: 38vh; overflow-y: auto; }

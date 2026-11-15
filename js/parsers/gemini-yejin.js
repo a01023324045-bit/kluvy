@@ -7,6 +7,23 @@ import { placeByIata } from '../places.js';
 import { makeDateKey } from '../dates.js';
 import { generateJson } from './gemini-client.js';
 
+// v2.5.1: 편명 누락 방지 — 12월 사진에서 편명이 통째로 비었다는 제보 (본 인식·편명 전용 재인식 프롬프트 공통)
+export const FLIGHT_MUST_RULES = `- ★ 편명 필수 규칙 (가장 자주 빠뜨리는 부분입니다):
+  · 숫자만 있는 편명도 편명입니다: '1212/1213' → flights: ["TW1212", "TW1213"], '033' → flights: ["TW033"]. flight·flights 를 빈 문자열·빈 배열로 두지 마세요.
+  · 시각('18:10', '06:35~13:32')은 편명이 아닙니다. flight·flights 에 시각을 넣지 마세요 (시각은 start/end).
+  · 칸에 숫자 쌍('721/806')이나 숫자 줄('711')이 보이면 반드시 flights 배열에 보이는 순서대로 넣으세요. 사진에는 TW 가 생략되어 있으니 TW 를 붙이세요.
+  · cellText 를 적었다면 그 글자에서 편명(숫자)을 한 번 더 찾아 flights 에 옮겨 적으세요. cellText 에 편명 숫자가 있는데 flights 가 비어 있으면 틀린 답입니다.`;
+
+// v2.5.1: 실제 2026-12 사진 형식 — 편명 줄과 구간 줄이 따로, 줄 수가 달라도 됨, 편명 쌍 2개, (S:..) 표기, L/O 여러 줄, 흐린 이전·다음 달 칸
+export const CELL_FORMAT_RULES = `- ★ 칸 글자 형식 (실제 12월 사진): 편명 줄과 구간 줄은 따로 적혀 있고 줄 수가 서로 달라도 됩니다. 편명 쌍 줄('721/846')이 두 개 이상 올 수 있고(한 칸에 비행편 4개), 구간 줄은 '공항/공항' 이며 마지막에 공항 하나('CJJ')가 따로 붙기도 합니다.
+  · cellText "721/846\\n837/838\\nGMP/CJU\\nCJJ/CJU\\nCJJ\\n14:30~23:10\\nL/O\\n23:10~14:25" → flightCount 4, flights ["TW721 GMP-CJU", "TW846 CJU-CJJ", "TW837 CJJ-CJU", "TW838 CJU-CJJ"], start "14:30", end "23:10", layovers [{"start": "23:10", "end": "14:25"}]. 편명 줄 번호와 구간 줄 번호를 억지로 맞추지 마세요 — 편명 쌍마다 구간을 차례로 이어 붙입니다 (쌍의 뒤 편은 다음 구간의 출발지로 갑니다).
+  · cellText "701/802\\n807/904\\nGMP/CJU\\nTAE/CJU\\nKWJ\\n05:10~14:40" → flights ["TW701 GMP-CJU", "TW802 CJU-TAE", "TW807 TAE-CJU", "TW904 CJU-KWJ"]
+  · cellText "667/668\\nGMP/TSA\\nGMP\\n09:20~17:30" → flights ["TW667 GMP-TSA", "TW668 TSA-GMP"]
+  · cellText "532\\nYVR/ICN\\n23:05(S:00:05)\\n~05:30" → start "23:05", end "05:30". 시각 뒤 '(S:00:05)' 괄호 표기는 참고 시각이라 무시하세요 ('13:45(S:14:45)' 의 시각은 13:45).
+  · 'L/O 23:10~14:25' 같은 줄이 칸 위·아래에 여러 개 붙을 수 있습니다 (각각 layovers 에 적고 flights 에는 넣지 마세요). 이튿날 칸에 같은 L/O·같은 비행 블록이 다시 나오면 이어지는 것입니다.
+  · 칸에 비행 블록(편명·구간·시각)이 있으면 type 이 '체류'여도 start·end·flights 를 반드시 채우세요. '청주 (체류)' 처럼 도시만 돌려주고 시각·편명을 비우면 틀린 답입니다 — cellText 에 칸 글자를 그대로 적기만 해도 앱이 다시 읽습니다.
+  · 달력 맨 첫 줄·마지막 줄의 흐린(회색) 숫자 칸은 이전·다음 달 날짜입니다. 그 칸은 schedule 에 넣지 마세요.`;
+
 export const GEMINI_PROMPT = `이 이미지는 트리니티항공(2026-09 티웨이항공에서 사명 변경, 편명 TW 그대로) 승무원의 모바일 월간 근무표 달력 캡처 사진입니다.
 1. 사진 상단에 표시된 연도(year)와 월(month)을 먼저 정확히 파악하세요.
 2. 1일부터 말일까지의 스케줄을 분석하여 반드시 아래 JSON 형식으로만 응답하세요. 설명이나 마크다운 코드블록은 일체 쓰지 마세요.
@@ -47,10 +64,12 @@ export const GEMINI_PROMPT = `이 이미지는 트리니티항공(2026-09 티웨
     - 'TRAIN 20:31~22:21' 같은 기차·이동·교육 시각은 start/end 에 넣지 말고 trains: [{\\"start\\": \\"20:31\\", \\"end\\": \\"22:21\\"}] 에 적으세요
     - 근무 칸 안의 3~4자리 숫자 쌍(721/806)은 날짜가 아니라 편명입니다
   · 화면에 '티웨이'·'트리니티'·'TW'·'TWB' 어느 쪽으로 보여도 같은 회사입니다
-  · 숫자가 편명인지 확실하지 않으면(시각·날짜일 수 있으면) 빈 문자열(\\"\\")로 두세요. 지어내지 마세요.
+  · 시각·날짜·공항 코드일 수도 있어 편명인지 정말 확실하지 않으면 flight 를 빈 문자열(\\"\\")로 두되 지어내지 마세요. 그 글자는 cellText 에 그대로 적으세요. 칸에 3~4자리 숫자(또는 숫자 쌍)가 또렷이 보이면 편명이니 비워 두면 안 됩니다.
+${FLIGHT_MUST_RULES}
+${CELL_FORMAT_RULES}
 - ★ 한 칸에 색 블록(줄 묶음)이 여러 개일 수 있습니다 (실제 사진에서 확인):
   · cellText: 그 칸 안의 글자를 위에서 아래로 보이는 줄 그대로 적으세요 (줄바꿈은 \\n, 맨 위 날짜 숫자는 빼고, 고치거나 합치지 말고). 예: \\"705/706\\n711\\nGMP/CJU\\nGMP/CJU\\n06:35~13:32\\nL/O\\n13:32~18:35\\"
-  · 편명 줄이 여러 개면(예: '705/706' 아래 '711') 모두 같은 비행 블록입니다 → flightCount 3, flights: [\\"TW705 GMP-CJU\\", \\"TW706 CJU-GMP\\", \\"TW711 GMP-CJU\\"]. 편명 줄 i 번째는 구간 줄 i 번째와 짝입니다 ('705/706'↔'GMP/CJU' 왕복, '711'↔'GMP/CJU'). 3개 이상이어도 하나도 빼지 마세요(최대 4).
+  · 편명 줄이 여러 개면(예: '705/706' 아래 '711') 모두 같은 비행 블록입니다 → flightCount 3, flights: [\\"TW705 GMP-CJU\\", \\"TW706 CJU-GMP\\", \\"TW711 GMP-CJU\\"]. 편명 줄(쌍)마다 구간 줄을 차례로 하나씩 받습니다 ('705/706'↔'GMP/CJU' 왕복, '711'↔'GMP/CJU'). 3개 이상이어도 하나도 빼지 마세요(최대 4).
   · 구간 줄 아래 공항 코드 한 줄은 이어서 도착하는 공항입니다: 'ICN/NRT' + 'ICN' = ICN→NRT→ICN, 'GMP/TSA' + 'GMP' = GMP→TSA→GMP.
   · 'L/O 13:32~18:35' 는 비행편이 아니라 현지 체류·대기입니다 → flights 에 넣지 말고 layovers: [{\\"start\\": \\"13:32\\", \\"end\\": \\"18:35\\"}] 에 적으세요. start/end 에도 넣지 마세요.
   · start/end = 그날 시작하는 비행 블록의 첫 시작 ~ 마지막 끝 (L/O·TRAIN 제외). 그날 시작하는 비행이나 대기가 있으면 start/end 는 반드시 채우세요(빈칸 금지).
@@ -87,7 +106,58 @@ export const YEJIN_SCHEMA = {
           isPureStay: { type: 'BOOLEAN' },
           isNightTurn: { type: 'BOOLEAN' }
         },
-        required: ['day', 'type']
+        required: ['day', 'type', 'cellText']
+      }
+    }
+  },
+  required: ['year', 'month', 'schedule']
+};
+
+/**
+ * v2.5.1: 편명만 다시 묻는 가벼운 두 번째 호출 (같은 사진, 근무 종류·시각은 묻지 않음).
+ * 프롬프트의 '편명 전용' 글자는 목 서버가 호출 종류를 가르는 표지이기도 하다 (tools/mock-rtdb.js).
+ */
+export const FLIGHTS_ONLY_PROMPT = `【편명 전용 재확인】 이 이미지는 트리니티항공(2026-09 티웨이항공에서 사명 변경, 편명 TW 그대로) 승무원의 모바일 월간 근무표 달력 캡처 사진입니다.
+이번 요청은 편명(비행편 번호)만 묻습니다. 근무 종류·시각·도시는 이미 저장되어 있으니 판단하지 마세요.
+1. 사진 상단에 표시된 연도(year)와 월(month)을 정확히 파악하세요.
+2. 편명 숫자가 하나라도 보이는 날마다 { day, cellText, flightCount, flights } 를 적으세요. 편명이 없는 날(OFF·SBY·대기·L/O 만 있는 날)은 넣지 마세요. 설명이나 마크다운 코드블록 없이 JSON 으로만 응답하세요.
+
+형식:
+{
+  "year": 2026,
+  "month": 12,
+  "schedule": [
+    { "day": 3, "cellText": "721/806\\nGMP/CJU\\n14:30~18:50", "flightCount": 2, "flights": ["TW721 GMP-CJU", "TW806 CJU-GMP"] },
+    { "day": 9, "cellText": "1212/1213\\nICN/NRT\\nICN\\n06:35~14:39", "flightCount": 2, "flights": ["TW1212 ICN-NRT", "TW1213 NRT-ICN"] }
+  ]
+}
+
+규칙:
+- cellText: 그 날짜 칸 안의 글자를 위에서 아래로 보이는 줄 그대로 적으세요 (줄바꿈은 \\n, 맨 위 날짜 숫자는 빼고, 고치거나 합치지 마세요).
+- flightCount: 그 칸에서 편명 숫자가 몇 개인지 먼저 세어 적고, 그 개수만큼 flights 에 보이는 순서대로 하나씩 적으세요 (최대 4). 'TW405'·'TWB405'·'405'·'0405' 모두 "TW405" 형식(TW 를 붙임, 앞자리 0 은 사진에 적힌 그대로 '033' → "TW033"). 공항 코드가 보이면 'TW721 GMP-CJU' 처럼 뒤에 붙이세요 (안 보이면 붙이지 마세요).
+- 'GMP-CJU' 같은 영문 3글자 공항 코드, 'L/O'·'TRAIN' 줄, 'HH:MM~HH:MM' 시각, 맨 위 날짜 숫자는 편명이 아닙니다.
+- 전날 밤 출발해 아침에 착륙하는 비행이 이틀 칸에 똑같이 다시 나오면 착륙하는 날 칸은 flights 에 넣지 마세요 (출발한 날에만).
+- 편명을 지어내지 마세요. 읽을 수 없는 날은 빼세요.
+${FLIGHT_MUST_RULES}
+${CELL_FORMAT_RULES}`;
+
+export const FLIGHTS_ONLY_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    year: { type: 'INTEGER', description: '사진 상단의 연도' },
+    month: { type: 'INTEGER', description: '사진 상단의 월(1~12)' },
+    schedule: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          day: { type: 'INTEGER' },
+          cellText: { type: 'STRING', description: "칸 안의 글자를 위에서 아래로 보이는 줄 그대로(줄바꿈 \\n, 날짜 숫자 제외, 고치지 말 것). 예: '1212/1213\\nICN/NRT\\nICN\\n06:35~14:39'" },
+          flightCount: { type: 'INTEGER', description: '이 칸에 보이는 편명(숫자)의 개수 (1~4)' },
+          flights: { type: 'ARRAY', items: { type: 'STRING' }, description: "편명, 보이는 순서 그대로 전부(최대 4). 예: ['TW721 GMP-CJU', 'TW806 CJU-GMP'] · ['TW1212', 'TW1213'] · ['TW033']. 숫자만 보여도 TW 를 붙임. 시각·공항 코드만 있는 것은 넣지 않음" },
+          flight: { type: 'STRING', description: "편명 전부를 '/' 로 이은 글자. 예: 'TW721/TW806 GMP-CJU', 'TW1212/TW1213', 'TW033'" }
+        },
+        required: ['day', 'cellText', 'flights']
       }
     }
   },
@@ -112,6 +182,14 @@ export async function fetchWithRetry(url, options, maxRetries = 2) {
 export async function recognizeYejinImage(base64Data, mimeType, apiKey, opts = {}) {
   const r = await generateJson({ apiKey, prompt: GEMINI_PROMPT, base64Data, mimeType, schema: YEJIN_SCHEMA, ...opts });
   return { parsed: r.data, model: r.model, fallbackFrom: r.fallbackFrom };
+}
+
+/**
+ * v2.5.1: 편명만 다시 인식 — 같은 사진·같은 호출 경로(recognizeYejinImage)에 프롬프트·스키마만 편명 전용으로 바꿔 쓴다.
+ * → { parsed, model, fallbackFrom }
+ */
+export function recognizeYejinFlights(base64Data, mimeType, apiKey, opts = {}) {
+  return recognizeYejinImage(base64Data, mimeType, apiKey, { prompt: FLIGHTS_ONLY_PROMPT, schema: FLIGHTS_ONLY_SCHEMA, ...opts });
 }
 
 /** (1단계 호환) Gemini 호출 → 응답 JSON 텍스트 */
@@ -164,7 +242,31 @@ export function mapGeminiItemDetailed(item, ctx) {
   const v = legacyMapGeminiItem(it);
   const ex = extrasFromItem(it);
   if (v && (v.type === '체류' || v.type === '퀵턴')) Object.assign(v, ex);
-  return { value: v, warnings: [] };
+  const warnings = [];
+  if (v && (v.type === '체류' || v.type === '퀵턴') && !v.isPureStay && !v.isArrivalOnly && !gfFlights(v).length) warnings.push(noFlightWarning(it));
+  // v2.5.1: '체류'로만 읽고 시각·편명·L/O 시각·칸 글자가 모두 없음 (실제 12월 12/10) → L/O 날처럼 조용히 지나가지 않게 경고
+  else if (v && v.type === '체류' && v.isPureStay && !v.isArrivalOnly && !v.start && !v.end && !String(v.flight || '').trim() && !(Array.isArray(v.layovers) && v.layovers.length)) {
+    warnings.push(`${NO_FLIGHT_WARN}: 시각·편명·L/O 시각·칸 글자(cellText)가 모두 비어 있음 — AI 가 이 칸을 '${v.destination || '체류'} (체류)'로만 읽음`);
+  }
+  return { value: v, warnings };
+}
+
+/** v2.5.1: 편명을 못 찾았을 때의 경고 글 앞머리 (요약·자세히가 이 글로 '편명 없음' 경고를 가른다) */
+export const NO_FLIGHT_WARN = '편명을 찾지 못함';
+
+/**
+ * 비행 근무인데 편명이 없을 때의 이유 (경고·console.warn 용)
+ *  - cellText 없음 / cellText 에 숫자 쌍 없음 / 숫자는 있으나 편명으로 못 봄(시각·0 뿐) / Gemini 가 편명을 주지 않음
+ */
+export function noFlightWarning(item) {
+  const ct = String((item && item.cellText) || '').trim();
+  const shown = ct ? ` (cellText: "${ct.replace(/\s+/g, ' ').slice(0, 40)}${ct.length > 40 ? '…' : ''}")` : '';
+  let why;
+  if (!ct && String((item && item.flight) || '').trim()) why = `flight 글자를 편명으로 해석하지 못함 ("${String(item.flight).trim().slice(0, 30)}")`;
+  else if (!ct) why = 'Gemini 가 편명(flight·flights)도 칸 글자(cellText)도 주지 않음';
+  else if (!/\d/.test(ct.replace(/\d{1,2}\s*:\s*\d{2}/g, ' '))) why = 'cellText에 숫자 쌍 없음';
+  else why = 'cellText의 숫자를 편명으로 보지 못함 (시각·날짜·0 뿐)';
+  return `${NO_FLIGHT_WARN}: ${why}${shown}`;
 }
 
 function legacyMapGeminiItem(item) {
@@ -218,7 +320,10 @@ function legacyMapGeminiItem(item) {
  *         없는 편은 다른 쪽에서 보태며, 구간(공항)이 빠진 레그는 다른 쪽에서 채운다.
  */
 export function geminiFlightFields(item) {
-  const raw = String((item && item.flight) || '').trim();
+  // v2.5.1: 시각('18:10')만 편명 칸에 들어온 경우는 편명이 아니다 — 글자 그대로 저장하지 않고 비움
+  const stripTimes = t => String(t || '').replace(/\d{1,2}\s*:\s*\d{2}(?:\s*[~\-–—]\s*\d{1,2}\s*:\s*\d{2})?/g, ' ').trim();
+  const raw0 = String((item && item.flight) || '').trim();
+  const raw = /[A-Za-z0-9가-힣]/.test(stripTimes(raw0)) ? raw0 : '';
   const list = Array.isArray(item && item.flights) ? item.flights.map(x => String(x || '').trim()).filter(Boolean) : [];
   const fromList = [];
   for (const t of list) for (const f of parseFlightList(t)) if (!fromList.some(x => x.iata === f.iata)) fromList.push(f);
@@ -251,12 +356,13 @@ const PLUS_TAIL_RE = '(?:\\s*\\(\\s*\\+\\s*1\\s*\\))?';
 const CELL_TOKEN_RE = new RegExp(
   '(?<lo>\\bL\\s*/\\s*[O0](?![A-Z0-9])|\\bLAYOVER\\b)' +
   '|(?<train>\\bTRAIN\\b|기차|\\bKTX\\b|\\bSRT\\b)' +
-  `|(?<time>${T_RE}${S_NOTE_RE}\\s*~\\s*(?:\\+\\s*(?:1(?![0-9:])\\s*)?)?(?:${T_RE}${S_NOTE_RE}${PLUS_TAIL_RE})?)` +
+  `|(?<time>${T_RE}${S_NOTE_RE}\\s*(?:~|[-–—](?=\\s*\\d{1,2}:\\d{2}))\\s*(?:\\+\\s*(?:1(?![0-9:])\\s*)?)?(?:${T_RE}${S_NOTE_RE}${PLUS_TAIL_RE})?)` +
   `|(?<tend>${T_RE}${S_NOTE_RE}${PLUS_TAIL_RE})` +
   '|(?<route>\\b[A-Z]{3}(?:\\s*(?:[/>\\-–—]|→)\\s*[A-Z]{3}\\b)+)' +
   '|(?<code>\\bOFF\\b|\\bSBY\\b|\\b(?:IS|GS)[A-Z]\\b|\\bTR\\b|\\bOAL\\b)' +
-  '|(?<ap>\\b[A-Z]{3}\\b)' +
-  '|(?<nums>(?:\\bTWB?\\s?)?\\d{1,4}(?:\\s*[/,·、]\\s*(?:TWB?\\s?)?\\d{1,4})*)',
+  '|(?<ap>\\b(?!TWB\\b)[A-Z]{3}\\b)' +
+  // v2.5.1: 5자리 이상 숫자는 편명으로 쪼개지 않음(앞뒤 숫자 금지), 'TW-405'·'TWB 405' 도 편명 앞 글자
+  '|(?<nums>(?<![0-9])(?:\\bTWB?[\\s-]?)?\\d{1,4}(?![0-9])(?:\\s*[/,·、]\\s*(?:\\bTWB?[\\s-]?)?(?<![0-9])\\d{1,4}(?![0-9]))*)',
   'g');
 
 const pad5 = t => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim()); return m ? `${m[1].padStart(2, '0')}:${m[2]}` : ''; };
@@ -275,7 +381,8 @@ function parseTimeToken(s) {
  * @param {{day?:number}} [opts] day: 칸 맨 앞의 날짜 숫자를 실수로 적었으면 버린다
  */
 export function parseYejinCellText(text, opts = {}) {
-  const src = String(text || '').toUpperCase()
+  // v2.5.1: 전각 숫자·기호(NFKC) 와 글자 그대로의 '\n' (줄바꿈이 두 글자로 온 경우) 도 받는다
+  const src = String(text || '').replace(/\\[nrt]/g, '\n').normalize('NFKC').toUpperCase()
     .replace(/[〜～∼]/g, '~').replace(/[／⁄]/g, '/').replace(/：/g, ':').replace(/[（]/g, '(').replace(/[）]/g, ')');
   const blocks = [];
   let cur = null;
@@ -291,7 +398,7 @@ export function parseYejinCellText(text, opts = {}) {
       if (g.code === 'OAL') { if (cur && cur.kind === 'flight') cur.oal = true; else newBlock({ kind: 'flight', nums: [], routes: [], start: '', end: '', oal: true }); }
       else newBlock({ kind: 'code', code: g.code, start: '', end: '' });
     } else if (g.nums) {
-      const list = g.nums.split(/[/,·、]/).map(x => x.replace(/TWB?/, '').trim()).filter(x => /^\d{1,4}$/.test(x)).filter(x => Number(x) !== 0); // v2.4.5: 앞자리 0 은 적힌 그대로 (033 → '033')
+      const list = g.nums.split(/[/,·、]/).map(x => x.replace(/TWB?[\s-]*/, '').trim()).filter(x => /^\d{1,4}$/.test(x)).filter(x => Number(x) !== 0); // v2.4.5: 앞자리 0 은 적힌 그대로 (033 → '033')
       if (!list.length) continue;
       if (isFirst && opts.day && list.length === 1 && Number(list[0]) === Number(opts.day) && g.nums.trim().length <= 2) continue; // 날짜 숫자
       if (cur && cur.kind === 'flight' && !cur.start && !cur.end) cur.nums.push(list);
@@ -312,6 +419,7 @@ export function parseYejinCellText(text, opts = {}) {
       const t = parseTimeToken(g.tend);
       if (cur && cur.start && !cur.end) { cur.end = t.start; if (t.plus) cur.plus = true; if (t.notes.length) cur.sNotes = [...(cur.sNotes || []), ...t.notes]; }
       else if (cur && !cur.start) cur.start = t.start;
+      else if (!cur) newBlock({ kind: 'duty', start: t.start, end: '' }); // v2.5.1: 칸이 시각으로 시작해도 버리지 않음
     }
   }
   return blocks.filter(b => b.kind !== 'flight' || b.nums.length || b.routes.length || b.start || b.oal);
@@ -384,7 +492,54 @@ export function annotateYejinMonth(items) {
       setSpan(b, back, fwd);
     }
   }
+  // v2.5.1: L/O 가 여러 날 칸에 걸쳐 나오면 (12/27~29 로마 L/O) 첫날 칸에서 구한 공항을 이어받는다 — 이틀째부터는 칸에 비행이 없어 공항을 알 수 없으므로
+  const days = [...byDay.keys()].sort((a, b) => a - b);
+  for (const d of days) {
+    const bl = byDay.get(d);
+    const legsOf = new Map(bl.filter(b => b.kind === 'flight').map(b => [b, legsOfFlightBlock(b)]));
+    bl.forEach((b, i) => {
+      if (b.kind !== 'lo') return;
+      b.placeHint = layoverPlace(bl, i, legsOf);
+      if (!b.placeHint) {
+        const prev = (byDay.get(d - 1) || []).find(x => x.kind === 'lo' && x.placeHint && blockSig(x) === blockSig(b));
+        if (prev) b.placeHint = prev.placeHint;
+      }
+    });
+  }
   return byDay;
+}
+
+/**
+ * L/O 의 공항: ① 이 L/O 가 시작하는 시각에 끝나는 비행(도착)이 칸에 있으면 그 도착지 (12/20: '13:45' 도착 L/O 가 비행 줄보다 위에 적힘)
+ *  ② 바로 앞 비행의 마지막 도착지 ③ 뒤 비행의 첫 출발지
+ */
+function layoverPlace(blocks, i, legsOf) {
+  const b = blocks[i];
+  const lastArr = bj => { const L = legsOf.get(bj) || []; return L.length ? (L[L.length - 1].arr || '') : ''; };
+  let place = '';
+  if (b.start) for (const bj of blocks) { if (bj !== b && bj.kind === 'flight' && bj.end === b.start && !place) place = lastArr(bj); }
+  for (let j = i - 1; j >= 0 && !place; j--) place = lastArr(blocks[j]);
+  for (let j = i + 1; j < blocks.length && !place; j++) { const L = legsOf.get(blocks[j]) || []; if (L.length) place = L[0].dep || ''; }
+  return place;
+}
+
+/**
+ * v2.5.1: 달력 첫 줄·마지막 줄의 흐린(이전·다음 달) 칸이 섞여 와도 버린다.
+ *  - 1일 항목보다 앞에 온 25일 이상 항목 = 이전 달 칸 (12월 사진 첫 줄에 11/29·11/30 이 보임)
+ *  - 말일 항목보다 뒤에 온 14일 이하 항목 = 다음 달 칸
+ */
+export function pruneAdjacentMonthItems(items, lastDay) {
+  const arr = Array.isArray(items) ? items : [];
+  const dayOf = it => Number(it && it.day);
+  const first = arr.findIndex(it => dayOf(it) === 1);
+  let lastIdx = -1;
+  arr.forEach((it, i) => { if (dayOf(it) === lastDay) lastIdx = i; });
+  return arr.filter((it, i) => {
+    const d = dayOf(it);
+    if (first > 0 && i < first && d >= 25) return false;
+    if (lastIdx >= 0 && i > lastIdx && d <= 14) return false;
+    return true;
+  });
 }
 
 /** 비행 블록 → 레그 [{no:'TW705', dep, arr}] — 편명 줄 i ↔ 구간 줄 i, 공항 둘이면 왕복처럼 번갈아, n+1 개면 차례대로 */
@@ -400,6 +555,33 @@ export function legsOfFlightBlock(b) {
     return { no: `TW${n}`, dep, arr };
   });
   if (!groups.length) return [];
+  // v2.5.1 (실제 12월 사진): 편명 줄과 구간 줄이 따로 있고 줄 수가 달라도 된다 ('721/846' '837/838' / 'GMP/CJU' 'CJJ/CJU' 'CJJ' = 편명 줄 2·구간 줄 3).
+  //   편명 줄(쌍)마다 구간 줄을 차례로 하나씩 받는다 (줄 번호를 억지로 맞추지 않음): 쌍의 앞 편 = 구간의 출발→도착,
+  //   뒤 편 = 도착→(구간 뒤에 붙은 공항 → 없으면 다음 쌍 구간의 출발지 → 없으면 처음 출발지). 구간이 모자라면 그 쌍은 빈 값,
+  //   남으면 마지막 쌍의 도착지 뒤에 이어 붙인다. 구간이 하나뿐이면 아래 옛 방식(전체 편명에 번갈아).
+  if (groups.length >= 2 && routes.length >= 2) {
+    const R = routes.map(r => r.slice());
+    let tail = ''; // 남는 구간의 마지막 공항 = 마지막 편의 도착지
+    if (R.length > groups.length) {
+      const extra = R.slice(groups.length);
+      tail = extra[extra.length - 1][extra[extra.length - 1].length - 1] || '';
+      R.length = groups.length;
+    }
+    const out = [];
+    groups.forEach((g, gi) => {
+      const r = R[gi];
+      if (!r || r.length < 2) { for (const n of g) out.push({ no: `TW${n}`, dep: '', arr: '' }); return; }
+      const C = r.slice();
+      if (g.length >= 2 && C.length < 3) {
+        const nextStart = R[gi + 1] && R[gi + 1][0];
+        C[2] = nextStart && nextStart !== C[1] ? nextStart : C[0];
+      }
+      while (C.length < g.length + 1) C.push(C[C.length - 2]);
+      if (tail && gi === groups.length - 1) C[g.length] = tail;
+      g.forEach((n, i) => out.push({ no: `TW${n}`, dep: C[i], arr: C[i + 1] }));
+    });
+    return out;
+  }
   if (groups.length === routes.length) return groups.flatMap((g, i) => assign(g, routes[i]));
   const flat = groups.flat();
   if (routes.length === 1) return assign(flat, routes[0]);
@@ -466,10 +648,12 @@ export function dayFromBlocks(item, blocks) {
     return o && o.dep && o.arr ? { ...l, dep: o.dep, arr: o.arr } : l;
   };
   let allLegs = ownFlights.flatMap(b => legsOf.get(b) || []).map(fillRoute);
-  if (!allLegs.length && ownFlights.some(b => b.kind === 'flight') && itemLegs.length) {
+  if (!allLegs.length && ownFlights.length && itemLegs.length) {
+    // v2.5.1: 칸 글자가 시각뿐('14:30~18:50' → duty 블록)이어도 Gemini 의 flights 를 버리지 않는다 (12월 편명 누락의 한 경로)
     allLegs = itemLegs.map(l => ({ no: l.iata, dep: l.dep, arr: l.arr }));
     warnings.push('칸 글자에서 편명을 찾지 못해 Gemini 의 flights 를 썼습니다');
   }
+  if (!allLegs.length && ownFlights.length) warnings.push(noFlightWarning(item));
   // 같은 편명이 두 번 보이면 한 번만
   allLegs = allLegs.filter((l, i) => allLegs.findIndex(x => x.no === l.no) === i);
   const fc = Number(item && item.flightCount);
@@ -485,9 +669,7 @@ export function dayFromBlocks(item, blocks) {
   const layovers = [];
   blocks.forEach((b, i) => {
     if (b.kind !== 'lo') return;
-    let place = '';
-    for (let j = i - 1; j >= 0 && !place; j--) { const L = legsOf.get(blocks[j]) || []; if (L.length) place = L[L.length - 1].arr || ''; }
-    for (let j = i + 1; j < blocks.length && !place; j++) { const L = legsOf.get(blocks[j]) || []; if (L.length) place = L[0].dep || ''; }
+    let place = layoverPlace(blocks, i, legsOf) || b.placeHint || '';
     const o = { start: b.start, end: b.end };
     if (b.startDay) o.startDay = b.startDay;
     if (b.endDay) o.endDay = b.endDay;
@@ -577,7 +759,7 @@ export function applyGeminiResult(parsed, scheduleDB, fallbackYear, fallbackMont
   const targetY = (parsed.year && parsed.year >= 2025 && parsed.year <= 2040) ? parsed.year : fallbackYear;
   const targetM = (parsed.month && parsed.month >= 1 && parsed.month <= 12) ? parsed.month : fallbackMonth;
 
-  const scheduleArray = Array.isArray(parsed.schedule) ? parsed.schedule : (Array.isArray(parsed.days) ? parsed.days : []);
+  const scheduleArray = pruneAdjacentMonthItems(Array.isArray(parsed.schedule) ? parsed.schedule : (Array.isArray(parsed.days) ? parsed.days : []), new Date(targetY, targetM, 0).getDate());
   const ann = annotateYejinMonth(scheduleArray); // v2.4.4 날짜 넘김 블록
   let count = 0;
   scheduleArray.forEach(item => {
@@ -607,8 +789,8 @@ export function resolveTargetMonth(parsed, fallbackYear, fallbackMonth) {
  */
 export function buildYejinPreviewRows(parsed, fallbackYear, fallbackMonth) {
   const { year, month } = resolveTargetMonth(parsed, fallbackYear, fallbackMonth);
-  const arr = Array.isArray(parsed && parsed.schedule) ? parsed.schedule : (Array.isArray(parsed && parsed.days) ? parsed.days : []);
   const lastDay = new Date(year, month, 0).getDate();
+  const arr = pruneAdjacentMonthItems(Array.isArray(parsed && parsed.schedule) ? parsed.schedule : (Array.isArray(parsed && parsed.days) ? parsed.days : []), lastDay);
   const ann = annotateYejinMonth(arr); // v2.4.4: 이틀 칸에 다시 나오는 블록(자정 넘김) 표시
   const byKey = new Map();
   for (const item of arr) {
@@ -618,6 +800,8 @@ export function buildYejinPreviewRows(parsed, fallbackYear, fallbackMonth) {
     const r = mapGeminiItemDetailed(item, ann.has(d) ? { blocks: ann.get(d) } : undefined);
     const row = { who: 'gf', dateKey, day: d, raw: { ...item }, value: r.value };
     if (r.warnings && r.warnings.length) row.warnings = r.warnings;
+    // v2.5.1: 편명을 못 읽은 날은 이유를 콘솔에 남긴다 (진단용 — 폰 원격 디버깅·개발자 도구)
+    for (const w of r.warnings || []) if (w.startsWith(NO_FLIGHT_WARN)) console.warn(`[예진 편명] ${month}/${d} ${w}`);
     byKey.set(dateKey, row);
   }
   return { year, month, rows: [...byKey.values()].sort((a, b) => a.day - b.day) };

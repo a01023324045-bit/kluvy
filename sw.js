@@ -5,7 +5,7 @@
 //       v2.5.0: 버전이 고정된 CDN 두 가지(Font Awesome 6.4.0 아이콘, SheetJS xlsx 0.18.5)만 따로 캐시(cache-first) →
 //       비행기모드에서도 아이콘이 보이고 엑셀 읽기가 된다. 그 밖의 다른 출처(Firebase·Google·AirLabs 등)와
 //       GET 이 아닌 요청은 건드리지 않는다 (근무표 데이터는 앱이 localStorage·IndexedDB 에 직접 보관).
-const CACHE_VERSION = 'kluvy-v2.5.0';
+const CACHE_VERSION = 'kluvy-v2.5.1';
 // CDN 캐시: 주소에 버전이 박혀 있어 내용이 바뀌지 않으므로 앱 버전과 따로 둔다 (앱 업데이트 때 지우지 않음)
 const CDN_CACHE = 'kluvy-cdn-fa6.4.0-xlsx0.18.5';
 const FA_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/';
@@ -52,6 +52,8 @@ const ASSETS = [
   './js/upload-merge.js',
   './js/upload-undo.js',
   './js/apply-summary.js',
+  './js/flight-stats.js',
+  './js/flight-reread.js',
   './js/flight.js',
   './js/flight-times.js',
   './js/airlabs.js',
@@ -72,6 +74,7 @@ const ASSETS = [
   './js/ui/backup-ui.js',
   './js/ui/recognize-preview.js',
   './js/ui/apply-bar.js',
+  './js/ui/reread-flights.js',
   './js/ui/flight-card.js'
 ];
 
