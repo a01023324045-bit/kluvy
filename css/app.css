@@ -291,3 +291,19 @@ textarea.field { height: auto; padding: 8px 10px; line-height: 1.45; }
 .pv-legs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
 .pv-legsum { font-size: 12px; font-weight: var(--kv-w-strong); color: var(--kv-text-3); margin-top: 4px; }
 .pv-legsum.is-multi { color: #075985; }
+
+/* v2.4.6 반영 결과 바 (바로 반영 → 한 줄 요약 + 되돌리기) — 모달(z-50)·미리보기(z-60) 위 */
+.apply-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); pointer-events: none; }
+.apply-bar__inner { pointer-events: auto; max-width: 28rem; margin: 0 auto; border-radius: 16px; padding: 10px 10px 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; box-shadow: 0 6px 24px rgba(15,23,42,.28); border: 1px solid; }
+.apply-bar.is-ok .apply-bar__inner { background: #ecfdf5; border-color: #6ee7b7; color: #064e3b; }
+.apply-bar.is-warn .apply-bar__inner { background: #fffbeb; border-color: #fcd34d; color: #78350f; }
+.apply-bar.is-info .apply-bar__inner { background: #eef2ff; border-color: #a5b4fc; color: #312e81; }
+.apply-bar__text { flex: 1 1 12rem; min-width: 0; font-size: 14px; line-height: 1.45; font-weight: var(--kv-w-strong); word-break: keep-all; overflow-wrap: anywhere; }
+.apply-bar__btns { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
+.apply-bar__btn { min-height: 44px; padding: 0 12px; border-radius: 12px; font-size: 14px; font-weight: var(--kv-w-strong); text-decoration: underline; color: inherit; }
+.apply-bar__btn--undo { background: #fff; text-decoration: none; border: 1px solid currentColor; display: inline-flex; align-items: center; gap: 5px; }
+.apply-bar__btn--undo.hidden { display: none; }
+.apply-bar__close { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; font-size: 18px; color: inherit; }
+.apply-bar__details { flex-basis: 100%; font-size: 13px; line-height: 1.5; padding: 6px 4px 2px 18px; list-style: disc; font-weight: var(--kv-w-body); }
+.preview-first-link { font-size: 13px; color: #4338ca; font-weight: var(--kv-w-strong); text-decoration: underline; min-height: 36px; padding: 0 4px; }
+.preview-first-link:active { color: #312e81; }

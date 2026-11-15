@@ -19,6 +19,7 @@ import { renderSyncBadge } from './ui/sync-badge.js';
 import { renderCalendar } from './render/calendar.js';
 import { getDbBaseUrl, buildDbUrl, dbFetch, dbGetJson } from './db-rest.js';
 import * as core from './sync-core.js';
+import { clearUndo } from './upload-undo.js';
 
 export { getDbBaseUrl };
 
@@ -110,6 +111,7 @@ const normAniv = arr => (Array.isArray(arr) ? arr : []).map(a => ({ name: a.name
 // ---------------- 저장 (로컬 + 큐 + 전송) ----------------
 /** 로컬 저장 + 바뀐 날짜를 큐에 넣고 서버로 전송 (운영본 saveDB 자리) */
 export function saveDB() {
+  clearUndo(); // v2.4.6: 다른 저장(편집·기념일·비우기·복원·되돌리기 …)이 있으면 '업로드 되돌리기'는 사라진다 (업로드는 저장 뒤에 새로 기록)
   safeSetStorage(STORAGE_KEYS.schedule, state.scheduleDB);
   safeSetStorage(STORAGE_KEYS.anniversaries, state.customAnniversaries);
   safeSetStorage(STORAGE_KEYS.fileHistory, state.fileHistory);

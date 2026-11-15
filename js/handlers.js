@@ -16,8 +16,9 @@ import {
 import {
   openUploadModalForCurrentMonth, closeUploadModal, onMonthSelectorChange, onFileSelected,
   toggleApiKeyInput, onApiKeyChanged, onGeminiModelChanged, toggleCloudSyncInput, clearTargetMonthData, processUploadFiles,
-  onAirlabsKeyChanged, checkAirlabsConnection, checkForUpdate
+  onAirlabsKeyChanged, checkAirlabsConnection, checkForUpdate, previewUploadFiles
 } from './ui/upload-modal.js';
+import { undoLastUpload, dismissApplyBar, toggleApplyDetails } from './ui/apply-bar.js';
 import { cancelRecognizePreview, applyRecognizePreview } from './ui/recognize-preview.js';
 import { fbLoginFromForm, fbLogout } from './ui/login.js';
 import { downloadBackup, openRestorePicker, onBackupFileSelected } from './ui/backup-ui.js';
@@ -35,8 +36,10 @@ export const handlers = {
   openUploadModalForCurrentMonth, closeUploadModal, onMonthSelectorChange, onFileSelected,
   toggleApiKeyInput, onApiKeyChanged, onGeminiModelChanged, toggleCloudSyncInput, onFirebaseUrlChanged, clearTargetMonthData, processUploadFiles,
   onAirlabsKeyChanged, checkAirlabsConnection, checkForUpdate,
-  // 인식 결과 미리보기
-  cancelRecognizePreview, applyRecognizePreview,
+  // 인식 결과 미리보기 (v2.4.6: 선택 기능 — [결과 먼저 보기] 를 눌렀을 때만 열림)
+  previewUploadFiles, cancelRecognizePreview, applyRecognizePreview,
+  // 바로 반영 결과 바 · 되돌리기 (v2.4.6)
+  undoLastUpload, dismissApplyBar, toggleApplyDetails,
   // 로그인
   fbLoginFromForm, fbLogout,
   // 백업 / 복원

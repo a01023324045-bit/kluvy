@@ -511,7 +511,7 @@ export function dayFromBlocks(item, blocks) {
   if (ownFlights.length && (!start || !end)) {
     start = start || pad5(item && item.start);
     end = end || pad5(item && item.end);
-    if (!start || !end) warnings.push('근무 시각(집합~끝)이 비어 있습니다 — 미리보기에서 채워 주세요');
+    if (!start || !end) warnings.push('근무 시각(집합~끝)이 비어 있습니다 — 날짜를 눌러 직접 채워 주세요');
   }
 
   const extras = {};

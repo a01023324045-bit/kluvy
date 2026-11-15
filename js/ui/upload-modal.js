@@ -1,6 +1,8 @@
 // 근무표 등록(업로드) 모달
-// 2단계: 규호 칸은 엑셀 또는 사진(jpg/png → Gemini), 예진 사진도 Gemini. 사진 인식 결과는 '미리보기'에서 확인·수정 후
-//        [캘린더에 반영]을 눌러야 저장. 예진 사진은 반영할 때 한 번만 업로드(1단계까지는 고를 때 + 반영할 때 두 번).
+// v2.4.6: 규호 칸은 엑셀 또는 사진(jpg/png → Gemini), 예진 사진도 Gemini. 인식이 끝나면 '미리보기 없이 바로 반영'하고
+//         화면 아래에 결과 한 줄 요약 + [되돌리기](10분)를 보여 준다. 미리보기(체크박스·편명 수정)는 [결과 먼저 보기] 로만 연다.
+//         업로드는 자기 칸(규호 my / 예진 gf)만 바꾸고, 직접 입력(✋)·빈칸·같은 값·date·약속·상대 칸은 건드리지 않는다.
+//         예진 사진은 반영할 때 한 번만 업로드한다.
 import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, GEMINI_MODEL, APP_VERSION } from '../config.js';
 import { state } from '../state.js';
 import { makeDateKey, makeMonthKey } from '../dates.js';
@@ -14,6 +16,9 @@ import { recognizeYejinImage, buildYejinPreviewRows, readFileAsBase64 } from '..
 import { recognizeKyuhoImage, buildKyuhoPreviewRows } from '../parsers/gemini-kyuho.js';
 import { getGeminiModel, setGeminiModel } from '../parsers/gemini-client.js';
 import { openRecognizePreview } from './recognize-preview.js';
+import { showApplyBar } from './apply-bar.js';
+import { captureBefore, diffEntries, saveUndo } from '../upload-undo.js';
+import { buildApplySummary } from '../apply-summary.js';
 import { planUploadRows, applyUploadRows, rowsFromMyMap, rowsFromGfDb, dedupeRows } from '../upload-merge.js';
 import { normalizeFlight, sourceLabel, findFlightEntry } from '../flight.js';
 import { refreshFlightTimes, fillFromFlightTable, getFlightTable, learnFlightFromGf, getAirlabsKey, setAirlabsKey, airlabsUsageText, pingAirlabs } from '../flight-times.js';
@@ -265,19 +270,6 @@ function setProgress(p, msg) {
   document.getElementById('ocrStatusText').innerText = msg;
 }
 
-/** 저장 + 해당 달로 이동 + 알림 + 창 닫기 */
-function finishUpload(year, month, info = '') {
-  saveDB();
-  state.uploadTargetYear = year;
-  state.uploadTargetMonth = month;
-  state.currentYear = year;
-  state.currentMonth = month;
-  state.selectedDateKey = makeDateKey(year, month, 1);
-  renderCalendar();
-  alert(`${year}년 ${month}월 근무표가 성공적으로 캘린더에 반영되었습니다!${info ? `\n${info}` : ''}`);
-  closeUploadModal();
-}
-
 function modelInfoText(results) {
   const used = results.filter(Boolean);
   if (!used.length) return '';
@@ -300,12 +292,55 @@ function fillFlightTimes(rows) {
   return rows;
 }
 
+/** [결과 먼저 보기] — 같은 인식을 하되 미리보기 창을 열어 확인·수정한 뒤 [반영] 을 누르게 한다 */
+export function previewUploadFiles() {
+  return processUploadFiles({ preview: true });
+}
+
+/** 반영 확정: 칸 쓰기 → 파일 이름·사진 → 저장(서버 칸 단위 PATCH) → 해당 달로 이동 → 요약 바 + 되돌리기 기록 */
+async function commitUpload(ctx, finalRows) {
+  const { planned, kFile, yFile, kyuhoMonth, yejinMonth, compressedYejin, shown, warns, fails } = ctx;
+  const before = captureBefore(state.scheduleDB, finalRows);
+  applyUploadRows(state.scheduleDB, finalRows);
+  const entries = diffEntries(before, state.scheduleDB, finalRows);
+  if (kFile && kyuhoMonth) {
+    const k = makeMonthKey(kyuhoMonth.year, kyuhoMonth.month);
+    if (!state.fileHistory[k]) state.fileHistory[k] = {};
+    state.fileHistory[k].kyuho = kFile.name;
+  }
+  if (yFile && yejinMonth) {
+    const k = makeMonthKey(yejinMonth.year, yejinMonth.month);
+    if (!state.fileHistory[k]) state.fileHistory[k] = {};
+    state.fileHistory[k].yejin = yFile.name;
+    await savePhotoForMonth(k, compressedYejin); // 사진 업로드는 여기서 한 번만
+  }
+  // 확정된 비행 근무에서 편명 시각을 배운다 (두 폰 공유 시간표)
+  for (const r of finalRows) if (r.who === 'gf') learnFlightFromGf(r.value, 'schedule');
+
+  const summary = buildApplySummary({ entries, planned, finalRows, warns, fails });
+  const aniv = JSON.parse(JSON.stringify(state.customAnniversaries || []));
+  saveDB(); // 이전 되돌리기 기록은 여기서 지워진다 → 이번 기록을 그 다음에 저장
+  const undoable = saveUndo({ entries, aniv, text: summary.text, tone: summary.tone, details: summary.details });
+  state.uploadTargetYear = shown.year;
+  state.uploadTargetMonth = shown.month;
+  state.currentYear = shown.year;
+  state.currentMonth = shown.month;
+  state.selectedDateKey = makeDateKey(shown.year, shown.month, 1);
+  renderCalendar();
+  closeUploadModal();
+  showApplyBar(summary, { undoable });
+  return summary;
+}
+
 /**
- * [변경사항 캘린더 반영]
- * 3단계: 엑셀·간편 텍스트도 사진과 같이 항상 미리보기를 거친다 (기존 값 → 새 값, 수동 입력 보호, 빈칸 보호).
- * 업로드는 자기 칸(규호 my / 예진 gf)만 바꾸고 데이트·약속·상대 칸은 건드리지 않는다.
+ * [반영] (v2.4.6: 바로 반영) / [결과 먼저 보기] ({ preview: true })
+ * 엑셀·사진·간편 텍스트를 읽어 기존 값과 비교(planUploadRows)한 뒤 —
+ *  · 기본: 새로 추가·변경 칸을 곧바로 반영. ✋ 수동 입력·근무표 빈칸·같은 값은 그대로 두고, 건너뛴 수를 요약에 알린다.
+ *  · 미리보기: 체크박스·편명 수정 창을 열고, 거기서 [반영] 을 눌렀을 때 같은 경로로 저장한다.
+ * 일부만 실패(예: 예진 사진 인식 오류)해도 나머지는 반영하고 요약에 실패를 함께 보여 준다. 전부 실패하면 반영하지 않고 알린다.
  */
-export async function processUploadFiles() {
+export async function processUploadFiles(opts) {
+  const preview = Boolean(opts && opts.preview === true);
   const btn = document.getElementById('btnStartScan');
   const originalBtnHtml = btn ? btn.innerHTML : '';
 
@@ -351,18 +386,27 @@ export async function processUploadFiles() {
 
     const rows = [];
     const results = [];
-    const warns = [];
+    const warns = []; // { short: 요약 바에 보일 짧은 글, long: 자세히·미리보기에 보일 글 }
+    const fails = []; // 인식 실패 (같은 형식)
+    const warn = (short, long = short) => warns.push({ short, long });
     let kyuhoMonth = null;
     let yejinMonth = null;
     let compressedYejin = null;
     const onStatus = msg => setProgress(45, msg);
     const sources = [];
+    // 한 자료의 인식이 실패해도 다른 자료는 계속 처리 (실패는 요약에 표시)
+    const guard = async (label, fn) => {
+      try { await fn(); } catch (err) {
+        console.warn(`${label} 처리 실패:`, err);
+        fails.push({ short: `${label} 인식 실패`, long: `${label} 처리 중 문제가 발생했습니다: ${err && err.message ? err.message : err}` });
+      }
+    };
 
     // 1) 규호 엑셀
     if (kFile && !kIsImage) {
       const excelMap = await readKyuhoExcel(kFile, targetY, targetM);
       const r = rowsFromMyMap(excelMap, 'excel');
-      if (!r.length) warns.push(`엑셀에서 '이규호' 행이나 날짜 머리글을 찾지 못했습니다 (${kFile.name}).`);
+      if (!r.length) warn('엑셀에서 이규호 행을 못 찾음', `엑셀에서 '이규호' 행이나 날짜 머리글을 찾지 못했습니다 (${kFile.name}).`);
       rows.push(...r);
       kyuhoMonth = { year: targetY, month: targetM };
       sources.push(`규호 엑셀: ${kFile.name}`);
@@ -372,41 +416,53 @@ export async function processUploadFiles() {
       const tmp = {};
       applyQuickTextInput(quickText, tmp, targetY, targetM);
       const r = rowsFromGfDb(tmp, 'text');
-      if (!r.length) warns.push('간편 텍스트에서 날짜를 찾지 못했습니다. (예: "3 오사카, 4-7 다낭, 8 OFF")');
+      if (!r.length) warn('간편 텍스트에서 날짜를 못 찾음', '간편 텍스트에서 날짜를 찾지 못했습니다. (예: "3 오사카, 4-7 다낭, 8 OFF")');
       rows.push(...r);
       sources.push('간편 텍스트');
     }
     // 3) 규호 근무표 사진
     if (kIsImage) {
-      setProgress(20, `${getGeminiModel()} 규호 근무표 사진 판독 중...`);
-      const b64 = await readFileAsBase64(kFile);
-      const r = await recognizeKyuhoImage(b64, kFile.type || 'image/jpeg', apiKey, { onStatus });
-      results.push(r);
-      const built = buildKyuhoPreviewRows(r.parsed, targetY, targetM);
-      kyuhoMonth = { year: built.year, month: built.month };
-      if (!built.rows.length) warns.push('규호 근무표 사진에서 이규호 행을 찾지 못했습니다.');
-      rows.push(...built.rows.map(x => ({ ...x, source: 'photo' })));
-      sources.push(`규호 사진: ${kFile.name}`);
+      await guard('규호 사진', async () => {
+        setProgress(20, `${getGeminiModel()} 규호 근무표 사진 판독 중...`);
+        const b64 = await readFileAsBase64(kFile);
+        const r = await recognizeKyuhoImage(b64, kFile.type || 'image/jpeg', apiKey, { onStatus });
+        results.push(r);
+        const built = buildKyuhoPreviewRows(r.parsed, targetY, targetM);
+        kyuhoMonth = { year: built.year, month: built.month };
+        if (!built.rows.length) warn('규호 사진에서 이규호 행을 못 찾음', '규호 근무표 사진에서 이규호 행을 찾지 못했습니다.');
+        rows.push(...built.rows.map(x => ({ ...x, source: 'photo' })));
+        sources.push(`규호 사진: ${kFile.name}`);
+      });
     }
     // 4) 예진 스케줄 사진
     if (yFile) {
-      setProgress(55, `${getGeminiModel()} 예진 스케줄 출퇴근 정밀 판독 중...`);
-      compressedYejin = await compressImageFile(yFile);
-      const b64 = await readFileAsBase64(yFile);
-      const r = await recognizeYejinImage(b64, yFile.type || 'image/jpeg', apiKey, { onStatus });
-      results.push(r);
-      const built = buildYejinPreviewRows(r.parsed, targetY, targetM);
-      yejinMonth = { year: built.year, month: built.month };
-      if (!built.rows.length) warns.push('예진 스케줄 사진에서 일정을 찾지 못했습니다.');
-      rows.push(...built.rows.map(x => ({ ...x, source: 'photo' })));
-      sources.push(`예진 사진: ${yFile.name}`);
+      await guard('예진 사진', async () => {
+        setProgress(55, `${getGeminiModel()} 예진 스케줄 출퇴근 정밀 판독 중...`);
+        const compressed = await compressImageFile(yFile);
+        const b64 = await readFileAsBase64(yFile);
+        const r = await recognizeYejinImage(b64, yFile.type || 'image/jpeg', apiKey, { onStatus });
+        results.push(r);
+        const built = buildYejinPreviewRows(r.parsed, targetY, targetM);
+        compressedYejin = compressed;
+        yejinMonth = { year: built.year, month: built.month };
+        if (!built.rows.length) warn('예진 사진에서 일정을 못 찾음', '예진 스케줄 사진에서 일정을 찾지 못했습니다.');
+        rows.push(...built.rows.map(x => ({ ...x, source: 'photo' })));
+        sources.push(`예진 사진: ${yFile.name}`);
+      });
     }
-    if (kIsImage || yFile) setProgress(100, '분석 완료! 미리보기에서 확인해 주세요.');
+    if (kIsImage || yFile) setProgress(100, preview ? '분석 완료! 미리보기를 엽니다.' : '분석 완료! 반영합니다.');
     for (const [who, mm] of [['규호 근무표', kIsImage ? kyuhoMonth : null], ['예진 스케줄', yejinMonth]]) {
-      if (mm && (mm.year !== targetY || mm.month !== targetM)) warns.push(`${who} 사진에서 읽은 달(${mm.year}년 ${mm.month}월)이 선택한 달(${targetM}월)과 달라 사진의 달로 반영합니다.`);
+      if (mm && (mm.year !== targetY || mm.month !== targetM)) warn(`${who} 사진의 달(${mm.month}월)로 반영`, `${who} 사진에서 읽은 달(${mm.year}년 ${mm.month}월)이 선택한 달(${targetM}월)과 달라 사진의 달로 반영합니다.`);
     }
     const modelInput = document.getElementById('geminiModel');
     if (modelInput) modelInput.value = getGeminiModel();
+
+    // 모두 실패: 아무것도 반영하지 않고 알린다 (창은 열어 둠 → 다시 시도)
+    if (!rows.length && fails.length) {
+      alert(`업로드 중 문제가 발생했습니다:\n${fails.map(f => f.long).join('\n')}`);
+      showApplyBar(buildApplySummary({ warns, fails }), {});
+      return;
+    }
 
     // 편명 시간표(두 폰 공유)를 최신으로 받아 두고, 시각이 빠진 비행을 채운다 (오래 걸리면 캐시 사용)
     if (rows.some(r => r.who === 'gf' && r.value && r.value.flight)) {
@@ -414,33 +470,28 @@ export async function processUploadFiles() {
     }
     const planned = planUploadRows(state.scheduleDB, fillFlightTimes(dedupeRows(rows)));
     const shown = yejinMonth || kyuhoMonth || { year: targetY, month: targetM };
+    const ctx = { planned, kFile, yFile, kyuhoMonth, yejinMonth, compressedYejin, shown, warns, fails };
 
-    openRecognizePreview({
-      title: `등록 미리보기 — ${shown.year}년 ${shown.month}월`,
-      subtitle: sources.join(' · '),
-      modelInfo: modelInfoText(results),
-      warn: warns.join(' '),
-      rows: planned,
-      onApply: async (finalRows) => {
-        applyUploadRows(state.scheduleDB, finalRows);
-        if (kFile) {
-          const k = makeMonthKey(kyuhoMonth.year, kyuhoMonth.month);
-          if (!state.fileHistory[k]) state.fileHistory[k] = {};
-          state.fileHistory[k].kyuho = kFile.name;
-        }
-        if (yFile) {
-          const k = makeMonthKey(yejinMonth.year, yejinMonth.month);
-          if (!state.fileHistory[k]) state.fileHistory[k] = {};
-          state.fileHistory[k].yejin = yFile.name;
-          await savePhotoForMonth(k, compressedYejin); // 사진 업로드는 여기서 한 번만
-        }
-        // 확정된 비행 근무에서 편명 시각을 배운다 (두 폰 공유 시간표)
-        for (const r of finalRows) if (r.who === 'gf') learnFlightFromGf(r.value, 'schedule');
-        const kept = planned.filter(r => r.status === 'manual').length - finalRows.filter(r => r.status === 'manual').length;
-        const info = [`${finalRows.length}칸 반영`, kept > 0 ? `✋ 직접 입력한 ${kept}칸은 그대로 두었습니다` : ''].filter(Boolean).join(', ');
-        finishUpload(shown.year, shown.month, `(${info})`);
-      }
-    });
+    if (preview) {
+      openRecognizePreview({
+        title: `등록 미리보기 — ${shown.year}년 ${shown.month}월`,
+        subtitle: sources.join(' · '),
+        modelInfo: modelInfoText(results),
+        warn: [...fails, ...warns].map(w => w.long).join(' '),
+        rows: planned,
+        onApply: finalRows => commitUpload(ctx, finalRows)
+      });
+      return;
+    }
+
+    // 바로 반영: 기본 체크 상태(새로 추가·변경)인 행을 그대로 적용. 수동·빈칸 보호는 planUploadRows 의 기본값이 그대로 지킨다.
+    const finalRows = planned.filter(r => r.include).map(r => ({ who: r.who, dateKey: r.dateKey, status: r.status, value: { ...r.value } }));
+    if (!planned.length) {
+      // 읽은 것이 하나도 없음 (인식 경고뿐) — 저장할 것도, 되돌릴 것도 없음
+      showApplyBar(buildApplySummary({ planned, finalRows, warns, fails }), {});
+      return;
+    }
+    await commitUpload(ctx, finalRows);
   } catch (err) {
     console.warn("업로드 오류:", err);
     alert("업로드 중 문제가 발생했습니다:\n" + err.message);

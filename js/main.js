@@ -9,6 +9,7 @@ import { refreshFlightTimes } from './flight-times.js';
 import { getConfiguredDbUrl } from './config.js';
 import { renderCalendar, updateDetailCard } from './render/calendar.js';
 import { initYearSelector } from './ui/upload-modal.js';
+import { initApplyBar } from './ui/apply-bar.js';
 import { updateFbLoginUI } from './ui/login.js';
 import { handlers } from './handlers.js';
 import { getPhotoBackend, migrateLocalStoragePhotos } from './photo-store.js';
@@ -76,6 +77,7 @@ function initApp() {
     updateFbLoginUI();
     renderCalendar();
     updateDetailCard();
+    initApplyBar(); // v2.4.6: 10분 안의 '되돌리기' 기록이 있으면 반영 결과 바를 다시 보여 줌
   } catch (err) {
     console.error("초기화 예외 발생:", err);
   }
