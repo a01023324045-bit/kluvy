@@ -70,7 +70,7 @@ export function flightNoVariants(iata) {
   const out = [raw];
   const add = d => { const v = `${p.airline}${d}`; if (!out.includes(v)) out.push(v); };
   add(String(Number(p.digits)));      // 0 뺀 형태
-  add(p.digits.padStart(3, '0'));     // 0 붙인 형태 (3자리)
+  add(String(Number(p.digits)).padStart(3, '0')); // 0 붙인 형태 (3자리)
   return out;
 }
 
