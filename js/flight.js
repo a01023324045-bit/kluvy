@@ -3,6 +3,8 @@
 // 트리니티항공(Trinity Airways) = 2026-09-10 티웨이항공에서 사명 변경. IATA 코드 TW·편명은 그대로, ICAO 는 TWB.
 // 근무표·사진에서 오는 편명 표기는 제각각이라 하나로 맞춘다:
 //   '405 ICN-FCO' · 'TW405' · 'TW 405' · 'TWB405' · '티웨이 405' · '트리니티405' · '405'  → { iata:'TW405', icao:'TWB405', dep, arr }
+// v2.4.5: 앞자리 0 은 적힌 그대로 둔다 — 사진의 '033' → 'TW033' (TW33 아님). 'TW033'·'TW33' 은 같은 편으로 취급(flightKey·sameFlight),
+//   AirLabs 같은 DB 가 0 을 빼고 쓰는 경우를 위해 flightNoVariants 로 조회용 변형(TW033 → TW33)을 만든다.
 import { localWallToUtc, tzOffsetMinutes } from './timezone.js';
 import { PLACES } from './places.js';
 
@@ -35,10 +37,74 @@ function prepFlightText(raw) {
   return { s, airports };
 }
 
+const FLIGHT_NO_RE = /^([A-Z0-9]*?[A-Z])(\d{1,4})$/;
+
+/** 'TW033' → { airline:'TW', digits:'033' } (알아볼 수 없으면 null) */
+export function splitFlightNo(iata) {
+  const m = FLIGHT_NO_RE.exec(String(iata || '').trim().toUpperCase().replace(/\s+/g, ''));
+  return m ? { airline: m[1], digits: m[2] } : null;
+}
+
+/** v2.4.5: 앞자리 0 을 뺀 비교용 편명 — 'TW033' · 'TW33' · 'TWB033' 모두 'TW33' (같은 편 판정·중복 제거·카드 병합 전용, 화면에는 쓰지 않음) */
+export function flightKey(iata) {
+  const p = splitFlightNo(iata);
+  if (!p) return String(iata || '').trim().toUpperCase();
+  const airline = p.airline === 'TWB' ? 'TW' : p.airline;
+  return `${airline}${Number(p.digits)}`;
+}
+
+/** 두 편명이 같은 편인가 (0 유무·TWB 무시) */
+export function sameFlight(a, b) {
+  return Boolean(a) && Boolean(b) && flightKey(a) === flightKey(b);
+}
+
+/**
+ * v2.4.5: 항공사 DB 조회용 편명 변형 — 원래 표기가 항상 첫째, 그다음 0 뺀 것, 0 붙여 3자리 맞춘 것 (중복 없이)
+ *   'TW033' → ['TW033', 'TW33']   'TW33' → ['TW33', 'TW033']   'TW405' → ['TW405']   'OZ5' → ['OZ5', 'OZ005']
+ *   UI 링크와 AirLabs 재시도가 같은 규칙을 쓴다. 변형이 원래와 같으면 넣지 않는다.
+ */
+export function flightNoVariants(iata) {
+  const raw = String(iata || '').trim().toUpperCase().replace(/\s+/g, '');
+  const p = splitFlightNo(raw);
+  if (!p) return raw ? [raw] : [];
+  const out = [raw];
+  const add = d => { const v = `${p.airline}${d}`; if (!out.includes(v)) out.push(v); };
+  add(String(Number(p.digits)));      // 0 뺀 형태
+  add(p.digits.padStart(3, '0'));     // 0 붙인 형태 (3자리)
+  return out;
+}
+
+/**
+ * 편명 시간표에서 편명으로 찾기 (flightTimes 캐시·카드 병합).
+ *  같은 표기 칸이 있으면 그것을 우선하되, 0 유무만 다른 칸(예: 옛 버전이 TW33 으로 저장한 것)도 같은 편이라 합쳐서 돌려준다
+ *  (겹치는 값은 같은 표기 쪽이 이김, days 는 날짜별로 합침). 하나뿐이면 그 객체 그대로.
+ */
+export function findFlightEntry(table, iata) {
+  if (!table || typeof table !== 'object' || !iata) return null;
+  const key = flightKey(iata);
+  const keys = Object.keys(table).filter(k => table[k] && typeof table[k] === 'object' && flightKey(k) === key);
+  if (!keys.length) return null;
+  if (keys.length === 1) return table[keys[0]];
+  keys.sort((a, b) => (a === iata ? 1 : 0) - (b === iata ? 1 : 0)); // 같은 표기가 마지막 = 덮어씀
+  const out = {};
+  for (const k of keys) {
+    const e = table[k];
+    Object.assign(out, e, e.days || out.days ? { days: { ...(out.days || {}), ...(e.days || {}) } } : {});
+  }
+  return out;
+}
+
+/** 편명 숫자: 적힌 그대로. 단 현장 표기는 최대 3자리 + 앞 0 이라 4자리 앞 0 (0405 → 405, 0033 → 033) 만 덜어 낸다 */
+function keepWrittenDigits(num) {
+  let s = String(num);
+  while (s.length > 3 && s.startsWith('0')) s = s.slice(1);
+  return s;
+}
+
 function tokenToFlight(code, num) {
   let c = code;
   if (c === 'TWB') c = 'TW';
-  const number = String(Number(num)); // 0405 → 405
+  const number = keepWrittenDigits(num); // v2.4.5: 적힌 숫자 그대로 (033 → 033). 4자리 앞 0 만 3자리로 (0405 → 405). 0 유무가 달라도 같은 편: flightKey · sameFlight
   return { airline: c, number, iata: `${c}${number}`, icao: c === HOME_AIRLINE.iata ? `${HOME_AIRLINE.icao}${number}` : '' };
 }
 
@@ -79,7 +145,7 @@ export function parseFlightList(raw) {
     const c = code || (firstCode && firstCode !== 'TWB' ? firstCode : 'TW');
     const f = tokenToFlight(c === 'TWB' ? 'TW' : c, num);
     if (Number(f.number) === 0) continue;
-    if (out.some(x => x.iata === f.iata)) continue;
+    if (out.some(x => sameFlight(x.iata, f.iata))) continue;
     out.push(f);
   }
   out.forEach((f, i) => {
@@ -138,7 +204,7 @@ export function gfFlights(gf) {
   const raw = Array.isArray(gf.flights) ? gf.flights : (gf.flights && typeof gf.flights === 'object' ? Object.keys(gf.flights).sort((a, b) => a - b).map(k => gf.flights[k]) : null);
   if (raw && raw.length) {
     const legs = raw.map(cleanLeg).filter(Boolean);
-    if (legs.length && legs[0].iata === main[0].iata) {
+    if (legs.length && sameFlight(legs[0].iata, main[0].iata)) {
       // 첫 편의 구간을 gf.flight 에서 고쳤으면 그쪽을 따름
       if (main[0].dep && main[0].arr && (!legs[0].dep || !legs[0].arr)) { legs[0].dep = main[0].dep; legs[0].arr = main[0].arr; }
       return legs;
@@ -175,7 +241,7 @@ export function buildGfFlightFields(legsIn) {
     if (!L) continue;
     const list = parseFlightList(L.no || '');
     list.forEach((f, j) => {
-      if (legs.some(x => x.no === f.iata)) return;
+      if (legs.some(x => sameFlight(x.no, f.iata))) return;
       const up = v => String(v || '').trim().toUpperCase();
       const leg = { no: f.iata, dep: (j === 0 && /^[A-Z]{3}$/.test(up(L.dep)) ? up(L.dep) : f.dep) || '', arr: (j === 0 && /^[A-Z]{3}$/.test(up(L.arr)) ? up(L.arr) : f.arr) || '' };
       if (legs.length >= MAX_LEGS) return;
@@ -357,7 +423,7 @@ export function learnableLegs(gf, source = 'schedule') {
   for (const L of legs) {
     if (L.source === 'manual' && L.dep && L.arr && HHMM.test(L.std) && HHMM.test(L.sta)) out.push({ code: L.iata, dep: L.dep, arr: L.arr, std: L.std, sta: L.sta, source: 'manual', perDay: true });
   }
-  if (one && !out.some(x => x.code === one.code)) out.push({ ...one, source });
+  if (one && !out.some(x => sameFlight(x.code, one.code))) out.push({ ...one, source });
   return out;
 }
 
@@ -373,7 +439,7 @@ export function fillGfFromTimetable(gf, table) {
   if (gfFlights(gf).length > 1) return null; // 왕복은 근무 시각(집합~해산)이라 한 편 시각으로 채우지 않음
   const f = normalizeFlight(gf.flight);
   if (!f || f.multi) return null;
-  const e = table && table[f.iata];
+  const e = findFlightEntry(table, f.iata);
   if (!e || !(e.std || e.sta)) return null;
   if (f.dep && e.dep && f.dep !== e.dep) return null; // 같은 편명이라도 구간이 다르면 쓰지 않음
   return { ...gf, start: gf.start || e.std || '', end: gf.end || e.sta || '', timesFrom: 'flightTimes' };

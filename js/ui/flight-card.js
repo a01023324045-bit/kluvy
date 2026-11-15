@@ -7,9 +7,9 @@
 //         크게 보이는 시각은 flight-view.js pickLegTimes (직접 입력 > 근무표 > 실제 > 예상 > 시간표 > 정기),
 //         AirLabs 는 정기·예상·실제·지연 라벨을 붙인 요약 한 줄 + 운항 날짜·구간 한 줄 + 안내 한 줄.
 // 데이터는 textContent 로만 넣는다.
-import { flightLinks, computeFlightTimes, airportCity, dayShift, KOREAN_AIRPORTS, gfFlights } from '../flight.js';
+import { flightLinks, computeFlightTimes, airportCity, gfFlights, findFlightEntry } from '../flight.js';
 import { getFlightTable, getAirlabsKey, lookupFlightOnAirlabs, onFlightTimesChanged } from '../flight-times.js';
-import { pickLegTimes, airlabsReference, resolveLegSelection, clampLeg, legChipLabel, lookupButtonText } from '../flight-view.js';
+import { pickLegTimes, airlabsReference, resolveLegSelection, clampLeg, legChipLabel, lookupButtonText, kstTail } from '../flight-view.js';
 
 let lastArgs = null;
 let lastMsg = { key: '', text: '' };
@@ -64,14 +64,6 @@ function openUploadForRephoto(dateKey) {
 }
 
 function mmdd(k) { return k ? `${Number(k.slice(5, 7))}/${Number(k.slice(8, 10))}` : ''; }
-
-function kstTail(side, baseKey) {
-  if (!side || !side.known || !side.kst) return '';
-  const sh = dayShift(baseKey, side.kstDate);
-  return side.code && KOREAN_AIRPORTS.includes(side.code)
-    ? (sh ? ` (${sh > 0 ? '+' : ''}${sh}일)` : '')
-    : ` → 한국 ${side.kst}${sh ? ` (${sh > 0 ? '+' : ''}${sh}일)` : ''}`;
-}
 
 function timeLine(label, side, baseKey, tag) {
   if (!side) return null;
@@ -208,7 +200,7 @@ export function renderFlightBox(box, dateKey, gf) {
   wrap.dataset.selectedLeg = String(sel);
   wrap.dataset.legCount = String(legs.length);
   if (multi) wrap.appendChild(renderChips(box, dateKey, gf, legs, sel));
-  renderLeg(wrap, dateKey, gf, leg, table[leg.iata] || null, sel, legs.length);
+  renderLeg(wrap, dateKey, gf, leg, findFlightEntry(table, leg.iata), sel, legs.length);
 
   // 실시간 보기 링크 (고른 레그) + AirLabs 조회(고른 레그만) + 시각 직접 입력
   const linkLabel = el('div', 'fl-src', `✈️ ${leg.iata} 실시간 보기 (새 창)`);
@@ -235,7 +227,7 @@ export function renderFlightBox(box, dateKey, gf) {
     btn.onclick = async () => {
       btn.disabled = true;
       btn.textContent = '불러오는 중...';
-      const e = table[leg.iata] || {};
+      const e = findFlightEntry(table, leg.iata) || {};
       const dep = leg.dep || e.dep || '', arr = leg.arr || e.arr || '';
       let r;
       try { r = await lookupFlightOnAirlabs(dep && arr ? `${leg.iata} ${dep}-${arr}` : leg.iata, dateKey); } catch (err) { r = { ok: false, message: `조회 중 오류: ${err && err.message ? err.message : err}` }; }

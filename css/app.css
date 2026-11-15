@@ -157,6 +157,17 @@ input[type="text"], input[type="email"], input[type="password"], input[type="tim
 .dt-sub { font-size: 12.5px; font-weight: var(--kv-w-strong); color: var(--kv-text-2); line-height: 1.4; margin-top: 1px; }
 .dt-tags { margin-top: 3px; line-height: 1.6; }
 .dt-tags .manual-tag { margin-left: 0; margin-right: 4px; }
+/* v2.4.4: L/O · TRAIN · 전날 출발 비행 — 비행 상자 밖 별도 줄 (display 는 지정하지 않음: .hidden 과 충돌 방지) */
+.dt-extras { margin-top: 2px; }
+.dt-extra { font-size: 13px; font-weight: var(--kv-w-strong); color: var(--kv-text-2); line-height: 1.5; word-break: keep-all; }
+.dt-extra--lo { color: var(--d-stay-fg); }
+.dt-extra--train { color: var(--d-tr-fg); }
+.duty-extra { font-size: var(--kv-fs-cell); line-height: 13px; font-weight: var(--kv-w-strong); color: var(--d-stay-fg); text-align: center; white-space: nowrap; overflow: hidden; letter-spacing: 0.02em; }
+.duty-arr { color: var(--d-stay-fg); }
+.pv-extras { margin-top: 4px; font-size: 13px; line-height: 1.45; color: var(--kv-text-2); font-weight: var(--kv-w-strong); }
+.pv-extra--lo { color: var(--d-stay-fg); }
+.pv-extra--train { color: var(--d-tr-fg); }
+.pv-warns { margin-top: 4px; font-size: 12.5px; line-height: 1.45; color: #b45309; }
 
 /* 비행 정보 상자 */
 .flight-box, #selectedDateTitle, #detailMyShiftText, #detailGfShiftText { word-break: keep-all; overflow-wrap: anywhere; } /* 한글 낱말 중간 줄바꿈 방지 (360px) */

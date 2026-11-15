@@ -15,7 +15,7 @@ import { recognizeKyuhoImage, buildKyuhoPreviewRows } from '../parsers/gemini-ky
 import { getGeminiModel, setGeminiModel } from '../parsers/gemini-client.js';
 import { openRecognizePreview } from './recognize-preview.js';
 import { planUploadRows, applyUploadRows, rowsFromMyMap, rowsFromGfDb, dedupeRows } from '../upload-merge.js';
-import { normalizeFlight, sourceLabel } from '../flight.js';
+import { normalizeFlight, sourceLabel, findFlightEntry } from '../flight.js';
 import { refreshFlightTimes, fillFromFlightTable, getFlightTable, learnFlightFromGf, getAirlabsKey, setAirlabsKey, airlabsUsageText, pingAirlabs } from '../flight-times.js';
 import { maskKey, cleanAirlabsKey } from '../airlabs.js';
 
@@ -293,7 +293,7 @@ function fillFlightTimes(rows) {
     const filled = fillFromFlightTable(r.value);
     if (!filled) continue;
     const f = normalizeFlight(filled.flight);
-    const e = getFlightTable()[f.iata] || {};
+    const e = findFlightEntry(getFlightTable(), f.iata) || {};
     r.value = filled;
     r.note = `🕒 ${f.iata} 편명 시간표로 시각을 채웠습니다 (${filled.start || '?'}~${filled.end || '?'}, 출처: ${sourceLabel(e.source)}). 다르면 칸을 고쳐 주세요.`;
   }

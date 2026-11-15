@@ -9,7 +9,7 @@
 //  2. AirLabs 값은 라벨(정기·예상·실제·지연)과 운항 날짜·구간을 붙여 '참고'로 짧게(요약 한 줄 + 운항 한 줄) 보여 준다.
 //  3. 정기 노선의 운항 요일에 그 날짜 요일이 없으면 ⚠️, AirLabs 구간이 근무표 구간과 다르면 ⚠️.
 //  4. 무료 플랜은 예상·실제·지연이 비어 있을 수 있음 → 한 줄로 알려 줌. 안내 문구는 모두 한 줄 이내(사용자 요청).
-import { sourceLabel } from './flight.js';
+import { sourceLabel, dayShift, KOREAN_AIRPORTS } from './flight.js';
 import { daysKo, dateWithDow, pickRouteVariant, statusKo } from './airlabs.js';
 
 export const SCHEDULED_NOTE = '※ 정기 시각은 실제와 다를 수 있음(AirLabs)';
@@ -28,6 +28,19 @@ export function delaysText(live) {
   const d = delayText(live.depDelay, '출발');
   const a = live.arrDelay !== live.depDelay ? delayText(live.arrDelay, '도착') : '';
   return [d, a].filter(Boolean).join(' · ');
+}
+
+/**
+ * 시각 옆 '→ 한국 HH:MM (+1일)' 꼬리 (v2.4.5: flight-card 에서 옮겨 테스트 가능하게 함, 동작 그대로).
+ *  예진 스케줄의 모든 시각은 그 공항의 현지시각이다 — 화면의 큰 시각은 항상 현지 그대로, 한국시각은 덧붙이는 참고일 뿐 시각을 바꾸지 않는다.
+ *  한국 공항(현지 = KST)은 '→ 한국' 을 붙이지 않고 날짜가 바뀔 때만 (+1일).
+ */
+export function kstTail(side, baseKey) {
+  if (!side || !side.known || !side.kst) return '';
+  const sh = dayShift(baseKey, side.kstDate);
+  return side.code && KOREAN_AIRPORTS.includes(side.code)
+    ? (sh ? ` (${sh > 0 ? '+' : ''}${sh}일)` : '')
+    : ` → 한국 ${side.kst}${sh ? ` (${sh > 0 ? '+' : ''}${sh}일)` : ''}`;
 }
 
 /** 실시간 결과에 예상·실제 값이 하나라도 있나 */
@@ -174,5 +187,7 @@ export function wouldCallAirlabs(entry, dateKey, now, { liveTtlMin, routeTtlDays
   const day = entry && entry.days && entry.days[dateKey];
   const liveFresh = Boolean(day && day.fetchedAt && now - day.fetchedAt < liveTtlMin * 60000);
   const routeFresh = Boolean(entry && entry.airlabs && entry.airlabs.fetchedAt && now - entry.airlabs.fetchedAt < routeTtlDays * 86400000);
+  const nm = entry && entry.airlabsNoMatch; // v2.4.5: 모든 편명 변형이 없다고 기록된 편은 기간 안에 다시 묻지 않음
+  if (nm && nm.at && !(entry && entry.airlabs) && !day && now - nm.at < routeTtlDays * 86400000) return false;
   return routesOnly ? !routeFresh : !liveFresh; // 오늘·어제·내일은 실시간(flight) 캐시, 그 밖은 정기 노선(routes) 캐시
 }

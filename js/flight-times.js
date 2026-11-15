@@ -12,7 +12,7 @@ import { AIRLABS_KEY_STORAGE, AIRLABS_USAGE_STORAGE, FLIGHT_TIMES_CACHE, STORAGE
 import { safeGetStorage, safeSetStorage } from './storage.js';
 import { dbFetch, dbGetJson, getDbBaseUrl } from './db-rest.js';
 import { SV_TIMESTAMP } from './sync-core.js';
-import { learnableLegs, normalizeFlight, fillGfFromTimetable } from './flight.js';
+import { learnableLegs, normalizeFlight, fillGfFromTimetable, flightNoVariants, splitFlightNo, findFlightEntry } from './flight.js';
 import {
   airlabsUrl, chooseEndpoint, parseAirlabsFlight, parseAirlabsRoutes, airlabsErrorDetail, cleanAirlabsKey, dateWithDow,
   AIRLABS_LIVE_TTL_MIN, AIRLABS_ROUTE_TTL_DAYS, AIRLABS_FREE_MONTHLY
@@ -94,8 +94,9 @@ export function learnFlightFromGf(gf, source = 'schedule') {
   const learned = [];
   for (const L of items) {
     const cur = t[L.code] || {};
-    if (cur.std === L.std && cur.sta === L.sta && cur.dep === L.dep && cur.arr === L.arr) continue;
-    if (L.perDay && (cur.std || cur.sta)) continue; // 하루치 직접 입력(지연 시각일 수 있음)은 기존 시간표(정기 포함)를 덮지 않음
+    const seen = findFlightEntry(t, L.code) || {}; // 0 유무만 다른 같은 편(TW33/TW033)에 이미 같은 값이면 새로 만들지 않음
+    if (seen.std === L.std && seen.sta === L.sta && seen.dep === L.dep && seen.arr === L.arr) continue;
+    if (L.perDay && (seen.std || seen.sta)) continue; // 하루치 직접 입력(지연 시각일 수 있음)은 기존 시간표(정기 포함)를 덮지 않음
     const entry = { dep: L.dep, arr: L.arr, std: L.std, sta: L.sta, source: L.source, updatedBy: email() };
     t[L.code] = { ...cur, ...entry, updatedAt: Date.now() };
     pending[L.code] = entry;
@@ -182,9 +183,40 @@ export async function pingAirlabs(rawKey) {
   return { ok: true, http, text: `정상 · 응답 ${short} (HTTP ${http})` };
 }
 
+/** v2.4.5: 다시 조회한 편명 안내 — '0 뺀 편명으로 다시 조회 (TW33)' (첫째는 원래 표기라 안내 없음) */
+export function retryNoteText(original, tried) {
+  const orig = splitFlightNo(original);
+  const parts = (tried || []).filter(v => v !== original).map(v => {
+    const p = splitFlightNo(v);
+    const stripped = orig && p && p.digits.length < orig.digits.length;
+    return `${stripped ? '0 뺀' : '0 붙인'} 편명으로 다시 조회 (${v})`;
+  });
+  return parts.join(', ');
+}
+
+/**
+ * 편명 변형(flightNoVariants)을 차례로 물어 본다 — not_found 일 때만 다음 변형으로 (다른 오류·성공이면 바로 멈춤).
+ * @returns {Promise<{json, p, used:string, tried:string[], missed:boolean}>}  missed = 모든 변형이 not_found
+ */
+async function askVariants(variants, ask, parse) {
+  const tried = [];
+  let last = null;
+  for (const v of variants) {
+    const json = await ask(v);
+    tried.push(v);
+    const p = parse(json, v);
+    last = { json, p, used: v, tried };
+    if (!(p.error && p.error.code === 'not_found')) return { ...last, missed: false };
+  }
+  return { ...last, missed: true };
+}
+
 /**
  * 버튼을 눌렀을 때만 호출 (자동 대량 호출 없음). 같은 편·날짜는 30분, 정기 노선은 7일 안에 다시 묻지 않고 캐시를 쓴다.
- * @returns {Promise<{ok:boolean, cached?:boolean, kind?:'flight'|'routes', message:string}>}
+ * v2.4.5: AirLabs 가 not_found 이면 0 유무를 바꾼 편명으로 다시 조회한다 (TW033 → TW033, TW33 순서 / TW33 → TW33, TW033).
+ *   - 결과 캐시 키는 항상 '처음 적힌 편명' 기준 (flightTimes/TW033/…)
+ *   - 변형 모두 not_found 면 flightTimes/{편명}/airlabsNoMatch 에 기록 → 7일 안에는 (force 가 아니면) 다시 묻지 않음 (무료 한도 보호)
+ * @returns {Promise<{ok:boolean, cached?:boolean, noMatch?:boolean, kind?:'flight'|'routes', message:string, tried?:string[]}>}
  */
 export async function lookupFlightOnAirlabs(flightStr, dateKey, { force = false, now = Date.now() } = {}) {
   const key = getAirlabsKey();
@@ -193,64 +225,94 @@ export async function lookupFlightOnAirlabs(flightStr, dateKey, { force = false,
   if (!f) return { ok: false, message: '편명을 알아볼 수 없습니다.' };
   if (!navigator.onLine) return { ok: false, message: '인터넷 연결이 없습니다.' };
   const t = getFlightTable();
-  const cur = t[f.iata] || {};
+  const cur = t[f.iata] || {};                    // 저장·갱신은 원래 편명 칸
+  const seen = findFlightEntry(t, f.iata) || {};  // 읽기(캐시 확인)는 0 유무만 다른 같은 편 칸도 함께
+  const variants = flightNoVariants(f.iata);
   const k = getKSTDate();
   const todayKey = makeDateKey(k.getFullYear(), k.getMonth() + 1, k.getDate());
   let kind = chooseEndpoint(dateKey, todayKey);
   let liveMsg = '';
   let liveOk = false;
+  let note = '';
+  let liveSeen = false; // 실시간 조회에서 이 편(다른 날짜 운항)이 실제로 있었는가
+  const allTried = [];
+
+  const nm = seen.airlabsNoMatch;
+  if (!force && nm && nm.at && !seen.airlabs && !(seen.days && seen.days[dateKey]) && now - nm.at < AIRLABS_ROUTE_TTL_DAYS * 86400000) {
+    const days = Math.floor((now - nm.at) / 86400000);
+    return { ok: false, cached: true, noMatch: true, kind, tried: nm.tried || variants, message: `AirLabs 에 이 편이 없습니다 (${days < 1 ? '오늘' : `${days}일 전`} ${(nm.tried || variants).join('·')} 모두 조회했지만 없음). 무료 한도를 아끼려고 ${AIRLABS_ROUTE_TTL_DAYS}일 안에는 다시 묻지 않습니다.` };
+  }
 
   if (kind === 'flight') {
-    const c = cur.days && cur.days[dateKey];
+    const c = seen.days && seen.days[dateKey];
     if (!force && c && c.fetchedAt && now - c.fetchedAt < AIRLABS_LIVE_TTL_MIN * 60000) {
       return { ok: true, cached: true, kind, message: `${Math.round((now - c.fetchedAt) / 60000)}분 전에 받은 정보입니다 (${AIRLABS_LIVE_TTL_MIN}분 안에는 다시 묻지 않음).` };
     }
-    let json;
-    try { json = await callAirlabs('flight', { flight_iata: f.iata }, key); } catch (e) { return { ok: false, message: netError(e) }; }
-    const p = parseAirlabsFlight(json, dateKey);
+    let r;
+    try { r = await askVariants(variants, v => callAirlabs('flight', { flight_iata: v }, key), json => parseAirlabsFlight(json, dateKey)); } catch (e) { return { ok: false, message: netError(e) }; }
+    allTried.push(...r.tried);
+    const { json, p } = r;
+    note = retryNoteText(f.iata, r.tried);
     if (p.error && p.error.code !== 'not_found') return { ok: false, message: airlabsErrorDetail(p.error, json._http) };
     if (!p.error && p.match) {
       const day = { std: p.std, sta: p.sta, staDate: p.staDate, depDate: p.depDate, etd: p.etd, eta: p.eta, atd: p.atd, ata: p.ata, status: p.status, depDelay: p.depDelay, arrDelay: p.arrDelay, delayCalc: p.delayCalc || false, dep: p.dep, arr: p.arr, fetchedAt: now };
+      const fillTop = !seen.std && !seen.sta;
       t[f.iata] = { ...cur, days: { ...(cur.days || {}), [dateKey]: day } };
-      if (!cur.std && !cur.sta) Object.assign(t[f.iata], { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, source: 'airlabs' });
+      if (t[f.iata].airlabsNoMatch) delete t[f.iata].airlabsNoMatch;
+      if (fillTop) Object.assign(t[f.iata], { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, source: 'airlabs' });
       persist(); notify();
       const body = { [`flightTimes/${f.iata}/days/${dateKey}`]: { ...day, fetchedAt: SV_TIMESTAMP } };
-      if (!cur.std && !cur.sta) Object.assign(body, { [`flightTimes/${f.iata}/dep`]: p.dep, [`flightTimes/${f.iata}/arr`]: p.arr, [`flightTimes/${f.iata}/std`]: p.std, [`flightTimes/${f.iata}/sta`]: p.sta, [`flightTimes/${f.iata}/source`]: 'airlabs', [`flightTimes/${f.iata}/updatedAt`]: SV_TIMESTAMP });
+      if (seen.airlabsNoMatch) body[`flightTimes/${f.iata}/airlabsNoMatch`] = null;
+      if (fillTop) Object.assign(body, { [`flightTimes/${f.iata}/dep`]: p.dep, [`flightTimes/${f.iata}/arr`]: p.arr, [`flightTimes/${f.iata}/std`]: p.std, [`flightTimes/${f.iata}/sta`]: p.sta, [`flightTimes/${f.iata}/source`]: 'airlabs', [`flightTimes/${f.iata}/updatedAt`]: SV_TIMESTAMP });
       patchFlight(body);
       liveOk = true;
-      liveMsg = '실시간 정보를 받았습니다.'; // 운항 날짜·구간은 상자에 표시
+      liveMsg = `실시간 정보를 받았습니다.${note ? ` · ${note}` : ''}`; // 운항 날짜·구간은 상자에 표시
       // 운항 요일을 같이 보여 주려고 정기 노선도 (7일 캐시가 없을 때만) 한 번 더 묻는다
-      const a0 = (t[f.iata] || {}).airlabs;
-      if (!force && a0 && a0.fetchedAt && now - a0.fetchedAt < AIRLABS_ROUTE_TTL_DAYS * 86400000) return { ok: true, kind, message: liveMsg };
+      const a0 = (t[f.iata] || {}).airlabs || seen.airlabs;
+      if (!force && a0 && a0.fetchedAt && now - a0.fetchedAt < AIRLABS_ROUTE_TTL_DAYS * 86400000) return { ok: true, kind, message: liveMsg, tried: r.tried };
     } else {
-      liveMsg = p.error ? 'AirLabs 실시간 정보에 이 편이 없어 정기 노선으로 봅니다. ' : `AirLabs 의 가장 가까운 운항이 ${dateWithDow(p.depDate)} 이라 정기 노선으로 봅니다. `;
+      liveMsg = p.error ? `AirLabs 실시간 정보에 이 편이 없어 정기 노선으로 봅니다${note ? ` (${note})` : ''}. ` : `AirLabs 의 가장 가까운 운항이 ${dateWithDow(p.depDate)} 이라 정기 노선으로 봅니다. `;
+      liveSeen = !p.error;
       kind = 'routes'; // 가장 가까운 운항이 다른 날짜 → 정기 노선으로
     }
   }
 
   const base = t[f.iata] || cur;
-  const a = base.airlabs;
+  const a = base.airlabs || seen.airlabs;
   if (!liveOk && !force && a && a.fetchedAt && now - a.fetchedAt < AIRLABS_ROUTE_TTL_DAYS * 86400000) {
     return { ok: true, cached: true, kind, message: `${liveMsg}정기 노선 정보는 ${AIRLABS_ROUTE_TTL_DAYS}일 안에 다시 묻지 않습니다 (캐시 사용).` };
   }
-  let json;
-  try { json = await callAirlabs('routes', { airline_iata: f.airline, flight_iata: f.iata }, key); } catch (e) {
-    return liveOk ? { ok: true, kind: 'flight', message: liveMsg } : { ok: false, message: netError(e) };
+  let r2;
+  try { r2 = await askVariants(variants, v => callAirlabs('routes', { airline_iata: f.airline, flight_iata: v }, key), (json, v) => parseAirlabsRoutes(json, v, dateKey)); } catch (e) {
+    return liveOk ? { ok: true, kind: 'flight', message: liveMsg, tried: allTried } : { ok: false, message: netError(e) };
   }
-  const p = parseAirlabsRoutes(json, f.iata, dateKey);
+  for (const v of r2.tried) if (!allTried.includes(v)) allTried.push(v);
+  const json = r2.json, p = r2.p;
+  const note2 = retryNoteText(f.iata, r2.tried);
   if (p.error) {
-    if (liveOk) return { ok: true, kind: 'flight', message: `${liveMsg} (정기 노선: ${airlabsErrorDetail(p.error, json._http)})` };
+    if (liveOk) return { ok: true, kind: 'flight', message: `${liveMsg} (정기 노선: ${airlabsErrorDetail(p.error, json._http)})`, tried: allTried };
+    if (r2.missed && !liveSeen) {
+      // 실시간(해당 날짜면)·정기 노선 모두, 모든 변형이 not_found → 같은 조회를 되풀이하지 않게 기록
+      const rec = { at: now, tried: allTried.slice() };
+      const cur2 = t[f.iata] || {};
+      t[f.iata] = { ...cur2, airlabsNoMatch: rec };
+      persist(); notify();
+      patchFlight({ [`flightTimes/${f.iata}/airlabsNoMatch`]: { at: SV_TIMESTAMP, tried: rec.tried } });
+      return { ok: false, noMatch: true, kind, tried: allTried, message: `${liveMsg}${airlabsErrorDetail(p.error, json._http)}${note2 ? ` · ${note2}` : ''} — ${allTried.join('·')} 모두 없어서 ${AIRLABS_ROUTE_TTL_DAYS}일 동안 다시 묻지 않습니다.` };
+    }
     return { ok: false, message: `${liveMsg}${airlabsErrorDetail(p.error, json._http)}` };
   }
   const route = { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, days: p.days, variants: p.variants, fetchedAt: now };
   const now2 = t[f.iata] || {};
   t[f.iata] = { ...now2, airlabs: route };
-  const fillTop = !now2.std && !now2.sta;
+  if (now2.airlabsNoMatch) delete t[f.iata].airlabsNoMatch;
+  const fillTop = !now2.std && !now2.sta && !seen.std && !seen.sta;
   if (fillTop) Object.assign(t[f.iata], { dep: p.dep, arr: p.arr, std: p.std, sta: p.sta, source: 'airlabs' });
   persist(); notify();
   const body = { [`flightTimes/${f.iata}/airlabs`]: { ...route, fetchedAt: SV_TIMESTAMP } };
+  if (now2.airlabsNoMatch || seen.airlabsNoMatch) body[`flightTimes/${f.iata}/airlabsNoMatch`] = null;
   if (fillTop) Object.assign(body, { [`flightTimes/${f.iata}/dep`]: p.dep, [`flightTimes/${f.iata}/arr`]: p.arr, [`flightTimes/${f.iata}/std`]: p.std, [`flightTimes/${f.iata}/sta`]: p.sta, [`flightTimes/${f.iata}/source`]: 'airlabs', [`flightTimes/${f.iata}/updatedAt`]: SV_TIMESTAMP });
   patchFlight(body);
-  if (liveOk) return { ok: true, kind: 'flight', message: liveMsg };
-  return { ok: true, kind, message: `${liveMsg}${p.operatesThatDay ? '정기 노선 시각을 받았습니다.' : '정기 노선 시각을 받았습니다 (이 날짜 요일은 정기 운항 요일이 아님 — 아래 ⚠️ 확인).'}` };
+  if (liveOk) return { ok: true, kind: 'flight', message: liveMsg, tried: allTried };
+  return { ok: true, kind, tried: allTried, message: `${liveMsg}${p.operatesThatDay ? '정기 노선 시각을 받았습니다.' : '정기 노선 시각을 받았습니다 (이 날짜 요일은 정기 운항 요일이 아님 — 아래 ⚠️ 확인).'}${note2 ? ` · ${note2}` : ''}` };
 }

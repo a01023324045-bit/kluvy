@@ -14,6 +14,7 @@
 // 사용자 확인(2026-11-14): 모든 응답이 HTTP 200, 오류는 본문 {"error":{"message","code"}} —
 //   키 없음 = wrong_params "Missing api_key", 틀린 키 = unknown_api_key "Unknown api_key". CORS 허용(access-control-allow-origin: *)
 import { weekdayOfKey } from './dates.js';
+import { flightKey } from './flight.js';
 
 export const AIRLABS_FREE_MONTHLY = 1000;     // 무료 플랜 월 요청 수 (cors.dev 2026-10 조사·사용자 조사 기준)
 export const AIRLABS_LIVE_TTL_MIN = 30;       // 같은 편·같은 날짜 실시간 재조회 최소 간격
@@ -149,7 +150,8 @@ export function parseAirlabsRoutes(json, iata, dateKey) {
   if (!json || typeof json !== 'object') return { error: { code: 'internal_error' } };
   if (json.error) return { error: json.error };
   const list = Array.isArray(json.response) ? json.response : (Array.isArray(json) ? json : []);
-  const mine = list.filter(x => x && String(x.flight_iata || '').toUpperCase() === String(iata).toUpperCase());
+  const want = flightKey(iata); // v2.4.5: 0 유무가 달라도(TW033 ↔ TW33) 같은 편
+  const mine = list.filter(x => x && flightKey(x.flight_iata) === want);
   if (!mine.length) return { error: { code: 'not_found' } };
   const hhmm = v => (/^\d{2}:\d{2}$/.test(v || '') ? v : '');
   const variants = mine.slice(0, 6).map(x => ({ dep: x.dep_iata || '', arr: x.arr_iata || '', std: hhmm(x.dep_time), sta: hhmm(x.arr_time), days: Array.isArray(x.days) ? x.days : [] }));

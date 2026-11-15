@@ -8,6 +8,7 @@ import { stayKstInfo } from '../timezone.js';
 import { isFlightDuty } from './flight-card.js';
 import { gfFlights, flightLabel, flightFieldsFromInputs, MAX_LEGS } from '../flight.js';
 import { mapGeminiItem } from '../parsers/gemini-yejin.js';
+import { dutyExtrasLines } from '../title-format.js';
 import { parseKyuhoShiftRule } from '../parsers/excel-kyuho.js';
 import { STATUS_LABEL, CHECK_MEANING, describeDuty, summarizeRows, isBlankDuty } from '../upload-merge.js';
 
@@ -17,6 +18,34 @@ let current = null; // { rows, onApply, onCancel, showSame }
 /** v2.4.0 미리보기 행의 편명 칸 수: 읽은 레그 수만큼(최소 2, 최대 MAX_LEGS=4) */
 export function previewLegSlots(legCount) {
   return Math.min(MAX_LEGS, Math.max(2, Number(legCount) || 0));
+}
+
+/** 편명 칸 값들 → 요약 '전체 3레그 · TW705 · TW706 · TW711' / '편명 없음' (입력하면 바로 갱신) */
+export function legSummaryText(values) {
+  const v = values || [];
+  const f = flightFieldsFromInputs({ f1: v[0] || '', f2: v[1] || '', f3: v[2] || '', f4: v[3] || '' });
+  const list = f.flights ? f.flights.map(l => l.no) : (f.flight ? [String(f.flight).split(' ')[0]] : []);
+  return { text: list.length ? `전체 ${list.length}레그 · ${list.join(' · ')}` : '편명 없음', count: list.length };
+}
+
+/**
+ * v2.4.4 미리보기 한 행에 보일 내용 (순수 함수 — 단위 테스트가 픽스처와 비교)
+ *  { flightRow, inputs:['TW705 GMP-CJU', …], summary, extras:[{kind,text}], warnings:[…] }
+ *  - 비행편 칸은 그날 시작하는 비행편만, L/O·TRAIN·전날 출발 비행은 extras(비행편 칸·비행 상자에 넣지 않음)
+ */
+export function previewRowView(row) {
+  const v = (row && row.value) || {};
+  const flightRow = Boolean(row && row.who === 'gf' && isFlightDuty(v));
+  const legs = flightRow ? gfFlights(v) : [];
+  const inputs = [];
+  if (flightRow) for (let i = 0; i < previewLegSlots(legs.length); i++) inputs.push(legs[i] ? flightLabel(legs[i]) : (i === 0 ? String(v.flight || '') : ''));
+  return {
+    flightRow,
+    inputs,
+    summary: flightRow ? legSummaryText(inputs).text : '',
+    extras: row && row.who === 'gf' ? dutyExtrasLines(v) : [],
+    warnings: (row && Array.isArray(row.warnings)) ? row.warnings.slice() : []
+  };
 }
 
 /** 미리보기 행 + 사용자가 고친 값 → 저장할 값 (순수 함수, 테스트용) */
@@ -40,8 +69,13 @@ export function finalizePreviewRow(row, edits = {}) {
     return v;
   }
   if (typeChanged) {
-    const m = mapGeminiItem({ ...row.raw, type, start: start ?? row.value.start ?? '', end: end ?? row.value.end ?? '', destination: dest ?? row.value.destination ?? '', flight: flight ?? row.value.flight ?? '' });
+    // v2.4.4: 사람이 근무 형태를 바꿨으면 칸 글자(cellText·blocks)로 다시 판정하지 않고 입력값으로만 매핑,
+    //         L/O·TRAIN·전날 출발 비행 기록은 비행 근무로 남을 때만 이어 받음
+    const { cellText, blocks, flights: rawFlights, layovers, trains, ...rawRest } = row.raw || {}; // eslint-disable-line no-unused-vars
+    const m = mapGeminiItem({ ...rawRest, flights: gfFlights(row.value).map(flightLabel), type, start: start ?? row.value.start ?? '', end: end ?? row.value.end ?? '', destination: dest ?? row.value.destination ?? '', flight: flight ?? row.value.flight ?? '' });
     if (fl && 'flight' in m) { m.flight = fl.flight; if (fl.flights) m.flights = fl.flights; else delete m.flights; }
+    const keepExtras = m.type === '체류' || m.type === '퀵턴';
+    for (const k of ['layovers', 'trains', 'carryIn']) { if (keepExtras && row.value[k]) m[k] = row.value[k]; else delete m[k]; }
     return m;
   }
   const v = { ...row.value };
@@ -182,21 +216,21 @@ export function openRecognizePreview(opts) {
       // v2.4.0: 사진에서 읽은 편명을 레그마다 한 칸씩 (최대 4칸, 3개 이상이면 3칸) + '전체 N레그 · TW721 · TW806' 요약
       // v2.4.1: [+ 레그] 없음 — 칸 수는 (읽은 레그 수, 최소 2). 모자라게 읽었으면 첫 칸에 '241/242/243' 처럼 적으면 레그별로 나뉜다.
       const legs = gfFlights(row.value);
-      const shown = previewLegSlots(legs.length);
+      const view = previewRowView(row);
+      const shown = view.inputs.length || previewLegSlots(legs.length);
       const legsBox = el('div', 'pv-legs');
       const ins = [];
       const nameOf = (i, n) => (n <= 2 ? ['가는 편', '오는 편'][i] : `${i + 1}레그`);
       const sum = el('div', 'pv-legsum');
       const refreshSum = () => {
-        const f = flightFieldsFromInputs({ f1: ins[0] ? ins[0].value : '', f2: ins[1] ? ins[1].value : '', f3: ins[2] ? ins[2].value : '', f4: ins[3] ? ins[3].value : '' });
-        const list = f.flights ? f.flights.map(l => l.no) : (f.flight ? [String(f.flight).split(' ')[0]] : []);
-        sum.textContent = list.length ? `전체 ${list.length}레그 · ${list.join(' · ')}` : '편명 없음';
-        sum.classList.toggle('is-multi', list.length > 1);
+        const s = legSummaryText(ins.map(x => x.value));
+        sum.textContent = s.text;
+        sum.classList.toggle('is-multi', s.count > 1);
       };
       const addIn = i => {
         const n = ins.length + 1;
         const cls = i === 0 ? 'pv-flight' : `pv-flight${i + 1}`;
-        const inp = input(`${cls} pv-input`, legs[i] ? flightLabel(legs[i]) : (i === 0 ? (row.value.flight || '') : ''), { placeholder: nameOf(i, Math.max(n, shown)), autocapitalize: 'characters', 'aria-label': `편명 ${nameOf(i, Math.max(n, shown))}` });
+        const inp = input(`${cls} pv-input`, view.inputs[i] !== undefined ? view.inputs[i] : (legs[i] ? flightLabel(legs[i]) : (i === 0 ? (row.value.flight || '') : '')), { placeholder: nameOf(i, Math.max(n, shown)), autocapitalize: 'characters', 'aria-label': `편명 ${nameOf(i, Math.max(n, shown))}` });
         const key = i === 0 ? 'flight' : `flight${i + 1}`;
         inp.addEventListener('input', () => { row.edits[key] = inp.value; touch(); refreshSum(); });
         ins.push(inp);
@@ -216,6 +250,21 @@ export function openRecognizePreview(opts) {
     edit.appendChild(timeWrap);
     td.appendChild(edit);
     if (legsBlock) td.appendChild(legsBlock);
+
+    // v2.4.4: L/O·TRAIN·전날 출발 비행 — 비행편 칸이 아니라 따로 (사진 한 칸에 블록이 여러 개인 날)
+    if (row.who === 'gf') {
+      const v4 = previewRowView(row);
+      if (v4.extras.length) {
+        const ex = el('div', 'pv-extras');
+        for (const l of v4.extras) ex.appendChild(el('div', `pv-extra pv-extra--${l.kind}`, l.text));
+        td.appendChild(ex);
+      }
+      if (v4.warnings.length) {
+        const w = el('div', 'pv-warns');
+        for (const t of v4.warnings) w.appendChild(el('div', 'pv-warn-line', `⚠️ ${t}`));
+        td.appendChild(w);
+      }
+    }
 
     // 예진 체류 비행: 한국시각 미리 보기 (달력 칸·상세 카드와 같은 함수 stayKstInfo) — 미등록 도시는 '(KR ?)'
     if (row.who === 'gf') {

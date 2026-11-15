@@ -8,6 +8,7 @@
 // 한국시각은 달력 칸·미리보기와 같은 stayKstInfo() 하나를 쓴다 (칸은 'KR07:15' 짧은 꼴 그대로).
 import { stayKstInfo, getKstDiffHours, kstDiffText, KST_UNKNOWN } from './timezone.js';
 import { gfFlights, legsSummary } from './flight.js';
+import { placeByIata } from './places.js';
 
 const HHMM = /^(\d{1,2}):(\d{2})$/;
 const pad2 = v => String(v).padStart(2, '0');
@@ -83,8 +84,63 @@ function getKstKnown(dest, dateKey) {
   return getKstDiffHours(dest, dateKey) !== null;
 }
 
-/** 달력 칸 툴팁: '예진 제주 퀵턴 14:30~22:21 TW721 외 2' (v2.4.0: 3레그 이상은 짧게) */
+/** 달력 칸 툴팁: '예진 제주 퀵턴 14:30~22:21 TW721 외 2' (v2.4.0: 3레그 이상은 짧게, v2.4.4: L/O·TRAIN 덧붙임) */
 export function cellTooltip(g, flightsShort) {
   if (!g || !g.type) return '';
-  return `예진 ${g.destination ? g.destination + ' ' : ''}${g.type}${g.start ? ` ${g.start}~${g.end}` : ''}${flightsShort ? ` ${flightsShort}` : ''}`;
+  const ex = dutyExtrasLines(g).map(l => l.text.replace(/^\S+\s/, ''));
+  return `예진 ${g.destination ? g.destination + ' ' : ''}${g.type}${g.start ? ` ${g.start}~${g.end}` : ''}${flightsShort ? ` ${flightsShort}` : ''}${ex.length ? ` · ${ex.join(' · ')}` : ''}`;
+}
+
+// ───────── v2.4.4 L/O · TRAIN · 전날 출발 비행 (비행 상자 밖에 따로 보이는 부가 일정) ─────────
+/** Firebase 가 배열을 {0:…,1:…} 객체로 돌려줘도 배열로 */
+export function asList(v) {
+  if (Array.isArray(v)) return v.filter(Boolean);
+  if (v && typeof v === 'object') return Object.keys(v).sort((a, b) => a - b).map(k => v[k]).filter(Boolean);
+  return [];
+}
+
+function dayWord(n) {
+  const k = Number(n) || 0;
+  if (!k) return '';
+  if (k === -1) return '전날 ';
+  if (k === 1) return '다음 날 ';
+  return k < 0 ? `${-k}일 전 ` : `${k}일 뒤 `;
+}
+
+/** '13:32 ~ 다음 날 18:35' · '전날 00:58 ~ 01:20' */
+export function spanText(o) {
+  return `${dayWord(o && o.startDay)}${(o && o.start) || '?'} ~ ${dayWord(o && o.endDay)}${(o && o.end) || '?'}`;
+}
+
+/**
+ * 부가 일정 줄 [{ kind:'carry'|'lo'|'train', text }] — 미리보기·상세 카드·툴팁 공용
+ *  carry  '🛬 전날 출발 TW165 CJU→SIN · 착륙 00:58'
+ *  lo     '🏨 L/O 제주 13:32 ~ 다음 날 18:35'
+ *  train  '🚆 TRAIN 20:31 ~ 22:21'
+ */
+export function dutyExtrasLines(g) {
+  const out = [];
+  if (!g || typeof g !== 'object') return out;
+  const ci = g.carryIn;
+  if (ci && typeof ci === 'object') {
+    const fl = asList(ci.flights).map(s => String(s).replace(/ ([A-Z]{3})-([A-Z]{3})$/, ' $1→$2')).join(' · ');
+    const when = ci.startDay && Number(ci.startDay) !== -1 ? dayWord(ci.startDay).trim() : '전날';
+    out.push({ kind: 'carry', text: `🛬 ${when} 출발 ${fl || '비행'} · 착륙 ${ci.end || '?'}` });
+  }
+  for (const o of asList(g.layovers)) {
+    const p = o.place ? placeByIata(o.place) : null;
+    const name = p ? p.name : (o.place || '');
+    out.push({ kind: 'lo', text: `🏨 L/O ${name ? name + ' ' : ''}${spanText(o)}` });
+  }
+  for (const o of asList(g.trains)) out.push({ kind: 'train', text: `🚆 TRAIN ${spanText(o)}` });
+  return out;
+}
+
+/** 달력 칸(예진만 보기)의 짧은 표시: 'L/O'(오늘 시작하는 L/O) · '🚆'(TRAIN) · 'L/O 🚆' · '' */
+export function cellExtraMark(g) {
+  if (!g || typeof g !== 'object') return '';
+  const m = [];
+  if (asList(g.layovers).some(o => !Number(o.startDay))) m.push('L/O');
+  if (asList(g.trains).length) m.push('🚆');
+  return m.join(' ');
 }

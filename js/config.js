@@ -88,4 +88,4 @@ export function getGeminiModelsEndpoint(apiKey) {
 }
 
 /** 화면에 보여 줄 앱 버전 (sw.js CACHE_VERSION 과 함께 표시) */
-export const APP_VERSION = '2.4.3';
+export const APP_VERSION = '2.4.5';

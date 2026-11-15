@@ -15,7 +15,7 @@ import { calculateBarPosition, kyuhoKind, gfKind } from '../schedule-model.js';
 import { getAnniversaryInfo } from '../anniversary.js';
 import { renderFlightBox } from '../ui/flight-card.js';
 import { flightsText } from '../flight.js';
-import { detailTitleParts, cellTooltip } from '../title-format.js';
+import { detailTitleParts, cellTooltip, dutyExtrasLines, cellExtraMark } from '../title-format.js';
 
 // 4글자 이상(예: 비슈케크·타이베이)은 좁은 칸에서 '…'으로 잘리지 않게 자간·여백을 줄인다 (app.css .duty--long)
 function longLabelClass(label) {
@@ -146,6 +146,14 @@ export function updateDetailCard() {
     if (g && g.manual) tags.push(el('span', 'manual-tag', '✋ 직접 입력'));
     if (g && g.timesFrom === 'flightTimes') tags.push(el('span', 'manual-tag', '🕒 편명 시간표'));
     if (tags.length) { const tg = el('div', 'dt-tags'); tg.append(...tags); gfText.appendChild(tg); }
+    // v2.4.4: L/O·TRAIN·전날 출발 비행은 비행 상자가 아니라 제목 아래 별도 줄
+    const exBox = document.getElementById('detailGfExtras');
+    if (exBox) {
+      exBox.textContent = '';
+      const lines = dutyExtrasLines(g);
+      for (const l of lines) exBox.appendChild(el('div', `dt-extra dt-extra--${l.kind}`, l.text));
+      exBox.classList.toggle('hidden', !lines.length);
+    }
   }
 
   const flightBox = document.getElementById('detailFlightBox');
@@ -266,9 +274,11 @@ export function renderCalendar() {
       const g = dayData.gf;
       duties.appendChild(yejinDuty(g));
       if (!showKyuho && g) {
+        const pureLo = !g.isArrivalOnly && (g.isPureStay || (g.type === '체류' && !g.start && !g.end));
         if (g.isArrivalOnly) {
-          // 도착일: 추가 표시 없음
-        } else if (g.isPureStay || (g.type === '체류' && !g.start && !g.end)) {
+          // 도착일: v2.4.4 전날 출발한 비행의 착륙 시각만 (예: 11/3 '착 00:58')
+          if (g.carryIn && g.carryIn.end) duties.appendChild(el('div', 'duty-time duty-arr', `착 ${g.carryIn.end}`));
+        } else if (pureLo) {
           duties.appendChild(el('div', 'duty-lo', 'L/O'));
         } else if (g.start && g.end) {
           const t = timeLines(g.start, g.end);
@@ -288,6 +298,10 @@ export function renderCalendar() {
           }
           duties.appendChild(t);
         }
+        // v2.4.4: L/O(오늘 시작)·TRAIN 은 비행과 따로 짧게 (이미 'L/O' 를 보인 체류 중간일은 TRAIN 만)
+        const mark = cellExtraMark(g);
+        const markText = pureLo ? mark.replace('L/O', '').trim() : mark;
+        if (markText) duties.appendChild(el('div', 'duty-extra', markText));
       }
     }
     cell.appendChild(duties);

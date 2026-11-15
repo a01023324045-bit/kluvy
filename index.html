@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="kluvy-version" content="2.4.3" />
+  <meta name="kluvy-version" content="2.4.5" />
   <title>KLUVY - 규호♥예진 근무표 & 데이트 플래너</title>
 
   <!-- PWA 홈 화면 및 단독 앱(Standalone) 설정 -->
@@ -173,6 +173,8 @@
             <span id="detailGfShiftText" class="detail-shift text-right">-</span>
           </div>
           <div class="timeline-track"><div id="detailGfBar" class="timeline-bar"></div></div>
+          <!-- v2.4.4: L/O · TRAIN · 전날 출발 비행 (비행 상자와 따로) -->
+          <div id="detailGfExtras" class="dt-extras hidden"></div>
           <!-- 편명이 있으면: 실시간 보기 링크 · 이륙/착륙(현지+KST) · AirLabs 조회 -->
           <div id="detailFlightBox" class="hidden pt-1"></div>
         </div>

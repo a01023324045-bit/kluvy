@@ -114,7 +114,10 @@ export function describeDuty(who, v) {
   if (who === 'gf') {
     const dest = v.destination && !['체류', '비행'].includes(v.destination) ? `${v.destination} ` : '';
     const extra = v.isPureStay ? ' (L/O)' : v.isArrivalOnly ? ' (도착일)' : '';
-    return `${dest}${v.type}${time}${extra}`;
+    // v2.4.4: L/O·TRAIN 이 따로 있으면 꼬리표 ('제주 체류 06:35~13:32 +L/O', '제주 퀵턴 14:30~18:50 +TRAIN')
+    const n = x => (Array.isArray(x) ? x.length : (x && typeof x === 'object' ? Object.keys(x).length : 0));
+    const tags = [n(v.layovers) && !v.isPureStay ? 'L/O' : '', n(v.trains) ? 'TRAIN' : ''].filter(Boolean);
+    return `${dest}${v.type}${time}${extra}${tags.length ? ` +${tags.join('·')}` : ''}`;
   }
   return `${v.type}${time}`;
 }
