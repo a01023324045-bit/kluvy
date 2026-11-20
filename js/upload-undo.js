@@ -7,7 +7,9 @@
 //    그 사이 다른 폰(동기화)이 같은 칸을 또 바꿨으면 그 칸은 그대로 두고 건너뛴 수로 알려 준다.
 //  - 되돌리면 saveDB() 가 칸 단위 PATCH 로 서버에도 보낸다 (이 파일은 저장만 담당, 전송은 하지 않음).
 // ⚠️ STORAGE_KEYS(운영 폰 호환 고정 목록)에는 넣지 않는다 — 임시 기록이라 없어도 무방.
-export const UNDO_KEY = 'kluvy_upload_undo_v1';
+import { modeKey } from './config.js';
+
+export const UNDO_KEY = modeKey('kluvy_upload_undo_v1'); // v2.6.0: 개인 모드는 kluvy_personal_ 접두어
 export const UNDO_TTL_MS = 10 * 60 * 1000;
 
 const listeners = new Set();

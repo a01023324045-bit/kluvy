@@ -8,7 +8,7 @@
 // 루트 규칙(두 UID 만 read/write)에 그대로 포함되므로 규칙 변경 불필요.
 // 쓰기는 칸 단위 루트 PATCH (근무표 동기화 대기열과 별개 — 실패하면 다음에 같은 편을 저장할 때 다시 보냄).
 // 폰 캐시: localStorage 'kluvy_flight_times_v1'.
-import { AIRLABS_KEY_STORAGE, AIRLABS_USAGE_STORAGE, FLIGHT_TIMES_CACHE, STORAGE_KEYS, getAirlabsBase } from './config.js';
+import { AIRLABS_KEY_STORAGE, AIRLABS_USAGE_STORAGE, FLIGHT_TIMES_CACHE, STORAGE_KEYS, getAirlabsBase, modeKey, IS_PERSONAL } from './config.js';
 import { safeGetStorage, safeSetStorage } from './storage.js';
 import { dbFetch, dbGetJson, getDbBaseUrl } from './db-rest.js';
 import { SV_TIMESTAMP } from './sync-core.js';
@@ -19,7 +19,7 @@ import {
 } from './airlabs.js';
 import { getKSTDate, makeDateKey } from './dates.js';
 
-const PENDING_KEY = 'kluvy_flight_times_pending';
+const PENDING_KEY = modeKey('kluvy_flight_times_pending');
 let table = null;
 const listeners = new Set();
 
@@ -144,6 +144,7 @@ function countUsage() {
 }
 export function airlabsUsageText() {
   const u = getAirlabsUsage();
+  if (IS_PERSONAL) return `이 기기 이번 달 ${u.count}회 사용 (무료 한도 월 ${AIRLABS_FREE_MONTHLY.toLocaleString()}회 — 내 기기 합산)`;
   return `이 폰 이번 달 ${u.count}회 사용 (무료 한도 월 ${AIRLABS_FREE_MONTHLY.toLocaleString()}회 — 두 폰 합산)`;
 }
 

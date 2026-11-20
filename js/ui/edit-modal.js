@@ -6,6 +6,10 @@ import { saveDB } from '../firebase-sync.js';
 import { renderCalendar } from '../render/calendar.js';
 import { learnFlightFromGf } from '../flight-times.js';
 import { gfFlights, flightLabel, flightFieldsFromInputs, MAX_LEGS } from '../flight.js';
+import { LAYOUT, personName } from '../app-mode.js';
+
+// v2.6.0 개인 모드: 규호(my) 근무·데이트 칸은 숨겨져 있고 저장하지 않는다 (한 사람 = gf 칸)
+const HAS_MY = LAYOUT.personSlots.includes('my');
 
 // v2.4.0: 레그(편)마다 편명·이륙·착륙 칸 (최대 4레그). 1레그 = inputGfFlight, N레그 = inputGfFlight{N}
 // v2.4.1: [+ 레그 추가]·[삭제] 없음 — 칸 수는 (인식·저장된 레그 수, 최소 2). 빈 칸은 저장에서 빠진다(flightFieldsFromInputs).
@@ -53,7 +57,7 @@ export function setEditMode(mode) {
     // 일괄 수정 대상: 매번 셋 다 체크된 상태로 시작 (운영본과 같은 동작), 필요 없는 항목을 끄면 그 항목은 안 건드림
     ['chkRangeKyuho', 'chkRangeYejin', 'chkRangePlan'].forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.checked = true;
+      if (el) el.checked = id === 'chkRangeKyuho' ? HAS_MY : true;
     });
   } else {
     tabSingle.className = "flex-1 min-h-[40px] rounded-lg bg-white shadow-xs text-indigo-700 font-semibold transition";
@@ -157,7 +161,7 @@ export function openEditModal(dateKey = state.selectedDateKey) {
 
   const manualNote = document.getElementById('editManualNote');
   if (manualNote) {
-    const who = [dayData.my && dayData.my.manual && '규호', dayData.gf && dayData.gf.manual && '예진'].filter(Boolean);
+    const who = [HAS_MY && dayData.my && dayData.my.manual && personName('my'), dayData.gf && dayData.gf.manual && personName('gf')].filter(Boolean);
     manualNote.textContent = who.length ? `✋ ${who.join('·')} 근무는 직접 입력한 값입니다 (근무표 등록으로 덮이지 않음).` : '';
     manualNote.classList.toggle('hidden', !who.length);
   }
@@ -287,17 +291,18 @@ export function saveModalChanges() {
       return;
     }
     targets = {
-      kyuho: document.getElementById('chkRangeKyuho').checked,
+      kyuho: HAS_MY && document.getElementById('chkRangeKyuho').checked,
       yejin: document.getElementById('chkRangeYejin').checked,
       plan: document.getElementById('chkRangePlan').checked
     };
     if (!targets.kyuho && !targets.yejin && !targets.plan) {
-      alert("일괄 적용할 항목(규호 근무 / 예진 근무 / 데이트·약속)을 하나 이상 선택해 주세요.");
+      alert(HAS_MY ? "일괄 적용할 항목(규호 근무 / 예진 근무 / 데이트·약속)을 하나 이상 선택해 주세요." : "일괄 적용할 항목(근무 / 약속·메모)을 하나 이상 선택해 주세요.");
       return;
     }
     targetDates = dateKeysBetween(rStartStr, rEndStr);
   } else {
     targetDates = [state.selectedDateKey];
+    if (!HAS_MY) targets.kyuho = false;
     if (!targets.kyuho && !targets.yejin && !targets.plan) { closeEditModal(); return; } // 바꾼 것 없음
   }
 
@@ -320,7 +325,9 @@ export function saveModalChanges() {
   renderCalendar();
 
   if (state.currentEditMode === 'range') {
-    const names = [targets.kyuho && '규호 근무', targets.yejin && '예진 근무', targets.plan && '데이트·약속'].filter(Boolean).join(', ');
+    const names = (HAS_MY
+      ? [targets.kyuho && '규호 근무', targets.yejin && '예진 근무', targets.plan && '데이트·약속']
+      : [targets.yejin && '근무', targets.plan && '약속·메모']).filter(Boolean).join(', ');
     alert(`${targetDates.length}일 동안의 일정이 일괄 변경되었습니다! (${names})`);
   }
 }

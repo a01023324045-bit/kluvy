@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="ko" data-app-mode="personal">
+<!-- 자동 생성: npm run build:personal (app/index.html 사본). 직접 고치지 말고 app/ 을 고친 뒤 다시 빌드 -->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="kluvy-version" content="kluvy-personal-v2.6.0" />
+  <title>내 스케줄 - 티웨이 근무표</title>
+
+  <!-- PWA 홈 화면 및 단독 앱(Standalone) 설정 -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="내 스케줄" />
+  <meta name="theme-color" content="#ffffff" />
+  <link rel="apple-touch-icon" href="icon-512.png" />
+  <!-- 탭 아이콘도 앱 안 파일로 (없으면 브라우저가 /favicon.ico 를 찾다가 오프라인에서 실패 로그를 남김) -->
+  <link rel="icon" type="image/png" href="icon-512.png" />
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- 서비스 워커 등록 스크립트 -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      const registerSw = () => {
+        // 앱을 열 때마다 새 버전(sw.js)이 있는지 바로 확인 → 업로드 후 다음 실행부터 새 파일 사용
+        navigator.serviceWorker.register('./sw.js').then((reg) => reg.update()).catch((err) => {
+          console.warn('PWA 서비스 워커 등록 실패:', err);
+        });
+      };
+      window.addEventListener('load', () => {
+        // 오프라인(비행기모드)이면 이미 설치된 서비스 워커가 저장된 화면을 보여 주므로, 새 버전 확인은 연결된 뒤에 한다
+        if (navigator.onLine === false) window.addEventListener('online', registerSw, { once: true });
+        else registerSw();
+      });
+    }
+  </script>
+
+  <!-- 스타일 및 CDN 라이브러리 -->
+  <link rel="stylesheet" href="css/tailwind.css" />
+  <!-- crossorigin: 달력 캡처(modern-screenshot)가 아이콘 글꼴 규칙을 읽어 이미지에 넣을 수 있게 (cdnjs 는 CORS 허용) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" crossorigin="anonymous" />
+
+  <link rel="preload" href="fonts/PretendardVariable.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body class="min-h-screen pb-20">
+
+  <!-- 상단 헤더: 제목 · 버튼(아이콘+글자, 44px) / D-Day · 동기화 상태 · 마지막 동기화 -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 px-3 pt-2 pb-2 shadow-sm">
+    <div class="max-w-md mx-auto">
+      <div class="flex items-center justify-between gap-2">
+        <h1 class="text-rose-600 text-[17px] font-bold tracking-tight flex items-center shrink-0 whitespace-nowrap">
+          <i class="fa-solid fa-heart mr-1 text-[15px]" data-couple-only></i><i class="fa-solid fa-plane-departure mr-1 text-[15px]" data-personal-only></i><span data-personal-text="내 스케줄">규호♥예진</span>
+        </h1>
+        <div class="flex items-center gap-1 shrink-0">
+          <button onclick="captureCalendar()" id="btnCaptureCalendar" class="hbtn" aria-label="달력 캡처">
+            <i class="fa-solid fa-camera text-indigo-600"></i><span>캡처</span>
+          </button>
+          <button onclick="openYejinImageModal()" class="hbtn" aria-label="예진 스케줄 사진" data-personal-aria="내 근무표 사진">
+            <i class="fa-solid fa-image text-rose-600"></i><span>사진</span>
+          </button>
+          <button onclick="openAnniversaryModal()" class="hbtn" aria-label="기념일">
+            <i class="fa-solid fa-cake-candles text-amber-600"></i><span>기념일</span>
+          </button>
+          <button onclick="openUploadModalForCurrentMonth()" class="hbtn hbtn--primary" aria-label="근무표 등록">
+            <i class="fa-solid fa-cloud-arrow-up"></i><span id="headerUploadBtnText">등록</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between gap-2 mt-2">
+        <div class="flex items-center gap-1.5 min-w-0">
+          <span id="dDayBadge" data-couple-only class="font-semibold text-rose-700 bg-rose-50 px-2 py-1 rounded-lg border border-rose-200 cursor-pointer text-[12px] whitespace-nowrap" onclick="openAnniversaryModal()">
+            D-Day 계산 중...
+          </span>
+          <span id="syncStatusBadge" onclick="manualSyncNow()" class="sync-badge text-[11px] leading-none bg-slate-100 text-slate-700 px-2 py-1.5 rounded-full font-semibold border border-slate-300 cursor-pointer inline-flex items-center whitespace-nowrap">
+            동기화 확인 중...
+          </span>
+        </div>
+        <span id="lastSyncText" class="text-[11px] text-slate-500 font-semibold whitespace-nowrap truncate min-w-0" title="서버와 마지막으로 주고받은 시각" data-personal-text="내 근무 캘린더">트리니티항공 &amp; 교대근무 캘린더</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-md mx-auto px-2.5 py-3 space-y-3">
+
+    <!-- v2.5.0 첫 진입 안내: 이 폰에 근무표가 하나도 없고 오프라인일 때 (빈 달력 대신) -->
+    <section id="offlineFirstRunNotice" role="status" aria-live="polite" class="hidden bg-amber-50 border border-amber-300 rounded-2xl px-4 py-3 text-amber-900">
+      <p class="font-bold text-[15px] flex items-center gap-2"><i class="fa-solid fa-plane-circle-xmark text-amber-600"></i>아직 이 폰에 저장된 근무표가 없습니다</p>
+      <p id="offlineFirstRunText" class="text-[14px] font-semibold mt-1">인터넷에 연결한 뒤 한 번 열어야 근무표를 내려받습니다.</p>
+      <p class="text-[13px] text-amber-800 mt-1">한 번 받아 두면 그다음부터는 비행기모드에서도 달력·상세·사진(이번 달과 다음 달)을 볼 수 있어요.</p>
+    </section>
+
+    <!-- 색 안내 (범례): 근무 종류 = 색 (운영본과 같은 색), 사람 = 칸 안 위치 (윗줄 규호 · 아랫줄 예진) -->
+    <section class="bg-white rounded-2xl px-3 py-2.5 shadow-sm border border-slate-200 space-y-1.5" aria-label="색 안내">
+      <div class="legend-row" data-couple-only>
+        <span class="legend-who text-blue-800"><i class="fa-solid fa-circle text-[8px] text-blue-600"></i>규호</span>
+        <span class="duty duty--k duty--jo">조근</span>
+        <span class="duty duty--k duty--seok">석</span>
+        <span class="duty duty--k duty--il">일근</span>
+        <span class="duty duty--k duty--off">휴가</span>
+      </div>
+      <div class="legend-row">
+        <span class="legend-who text-rose-700"><i class="fa-solid fa-circle text-[8px] text-rose-600"></i><span data-personal-text="{name}">예진</span></span>
+        <span class="duty duty--y duty--quick">퀵턴</span>
+        <span class="duty duty--y duty--stay">체류</span>
+        <span class="duty duty--y duty--standby">대기</span>
+        <span class="duty duty--y duty--tr">TR</span>
+        <span class="duty duty--y duty--off">OFF</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-600 font-semibold pt-0.5">
+        <span data-couple-only>칸 윗줄 규호 · 아랫줄 예진</span>
+        <span class="inline-flex items-center gap-1"><span class="inline-flex w-5 h-5 rounded-full bg-indigo-700 text-white text-[11px] items-center justify-center font-semibold">13</span>오늘</span>
+      </div>
+    </section>
+
+    <!-- 보기 필터 (v2.5.2: 기념일 표시 스위치 추가 — 360px 에서 한 줄에 들어가도록 라벨은 짧게) -->
+    <section class="bg-white rounded-2xl px-3 py-2 shadow-sm border border-slate-200 flex items-center justify-between gap-2" aria-label="달력 보기">
+      <span class="font-semibold text-slate-700 text-[14px] whitespace-nowrap shrink-0"><i class="fa-solid fa-sliders text-indigo-600 mr-1"></i>보기</span>
+      <div class="filter-group">
+        <button onclick="toggleScheduleFilter('kyuho')" id="filterBtnKyuho" data-couple-only aria-pressed="true" class="filter-btn filter-btn--k">
+          <i class="fa-solid fa-user-check"></i> 이규호
+        </button>
+        <button onclick="toggleScheduleFilter('yejin')" id="filterBtnYejin" data-couple-only aria-pressed="true" class="filter-btn filter-btn--y">
+          <i class="fa-solid fa-plane"></i> 이예진
+        </button>
+        <button onclick="toggleAnniversaryDisplay()" id="filterBtnAniv" aria-pressed="true" class="filter-btn filter-btn--a" title="달력·상세 카드·캡처에 기념일 표시 (끄면 숨김, 기념일 자체는 지워지지 않음)">
+          <i class="fa-solid fa-cake-candles"></i> 기념일
+        </button>
+      </div>
+    </section>
+
+    <!-- 월간 캘린더 (캡처 대상 영역) -->
+    <section id="calendarCaptureArea" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="px-2 py-1.5 flex items-center justify-between border-b border-slate-200">
+        <button onclick="changeMonth(-1)" class="w-11 h-11 rounded-full hover:bg-slate-100 active:bg-slate-200 flex items-center justify-center text-slate-700" aria-label="이전 달">
+          <i class="fa-solid fa-chevron-left"></i>
+        </button>
+        <span id="currentMonthYear" data-cap-fit class="cal-month-title text-[19px] font-bold text-slate-900 tracking-tight whitespace-nowrap shrink-0">2026. 09</span>
+        <button onclick="changeMonth(1)" class="w-11 h-11 rounded-full hover:bg-slate-100 active:bg-slate-200 flex items-center justify-center text-slate-700" aria-label="다음 달">
+          <i class="fa-solid fa-chevron-right"></i>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-7 text-center text-[12px] font-semibold py-1.5 bg-slate-50 text-slate-600 border-b border-slate-200">
+        <span class="text-red-600">일</span>
+        <span>월</span>
+        <span>화</span>
+        <span>수</span>
+        <span>목</span>
+        <span>금</span>
+        <span class="text-blue-700">토</span>
+      </div>
+
+      <div id="calendarGrid" class="grid grid-cols-7 select-none bg-white"></div>
+    </section>
+
+    <!-- 선택 날짜 상세 카드 -->
+    <section class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 space-y-4">
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <h2 class="flex items-center gap-2">
+            <i class="fa-regular fa-calendar-check text-indigo-600"></i>
+            <span id="selectedDateTitle" class="font-bold text-slate-900 text-[16px]">2026년 9월 8일 (화)</span>
+          </h2>
+          <div id="selectedDateTags" class="flex flex-wrap gap-1 mt-1.5"></div>
+        </div>
+        <button onclick="openEditModal()" class="btn shrink-0 bg-rose-50 text-rose-700 border border-rose-200 text-[13px] px-3">
+          <i class="fa-solid fa-pen-to-square"></i><span data-personal-text="일정 기입">일정/데이트 기입</span>
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <div class="flex justify-between text-[11px] text-slate-500 px-0.5 font-semibold tabular-nums -mb-1.5">
+          <span>0시</span><span>6시</span><span>12시</span><span>18시</span><span>24시</span>
+        </div>
+
+        <!-- 규호 타임라인 -->
+        <div id="timelineWrapKyuho" data-couple-only class="detail-person detail-person--k space-y-1.5">
+          <div class="flex items-baseline justify-between gap-2 flex-wrap">
+            <span class="font-bold text-[14px] text-blue-800">이규호</span>
+            <span id="detailMyShiftText" class="detail-shift text-right">-</span>
+          </div>
+          <div class="timeline-track"><div id="detailMyBar" class="timeline-bar"></div></div>
+        </div>
+
+        <!-- 예진 타임라인 -->
+        <div id="timelineWrapYejin" class="detail-person detail-person--y space-y-1.5">
+          <div class="flex items-baseline justify-between gap-2 flex-wrap">
+            <span class="font-bold text-[14px] text-rose-700" data-personal-text="{name}">이예진</span>
+            <span id="detailGfShiftText" class="detail-shift text-right">-</span>
+          </div>
+          <div class="timeline-track"><div id="detailGfBar" class="timeline-bar"></div></div>
+          <!-- v2.4.4: L/O · TRAIN · 전날 출발 비행 (비행 상자와 따로) -->
+          <div id="detailGfExtras" class="dt-extras hidden"></div>
+          <!-- 편명이 있으면: 실시간 보기 링크 · 이륙/착륙(현지+KST) · AirLabs 조회 -->
+          <div id="detailFlightBox" class="hidden pt-1"></div>
+        </div>
+      </div>
+
+      <!-- 데이트 및 개인 약속 -->
+      <div class="space-y-2">
+        <div id="datePlanBox" data-couple-only class="p-3 bg-rose-50 rounded-xl border border-rose-200 text-[14px] space-y-1">
+          <div class="flex items-center justify-between gap-2">
+            <span class="font-bold text-rose-700 flex items-center gap-1.5">
+              <i class="fa-solid fa-heart"></i> 우리의 데이트 약속
+            </span>
+            <span id="datePlanTime" class="text-rose-700 tabular-nums text-[13px] font-semibold">미정</span>
+          </div>
+          <p id="datePlanNote" class="text-slate-700">등록된 데이트가 없습니다.</p>
+        </div>
+
+        <div class="promise-grid grid grid-cols-2 gap-2 text-[13px]">
+          <div class="bg-blue-50 p-2.5 rounded-xl border border-blue-200" data-couple-only>
+            <span class="font-semibold text-blue-800 mb-0.5 flex items-center gap-1">
+              <i class="fa-regular fa-user"></i> 규호 개인약속
+            </span>
+            <span id="detailMyPromise" class="text-slate-700 break-words">없음</span>
+          </div>
+          <div class="bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+            <span class="font-semibold text-rose-700 mb-0.5 flex items-center gap-1">
+              <i class="fa-regular fa-user"></i> <span data-personal-text="내 약속 · 메모">예진 개인약속</span>
+            </span>
+            <span id="detailGfPromise" class="text-slate-700 break-words">없음</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 1. 일정 수동 편집 모달 -->
+  <div id="editModal" class="fixed inset-0 bg-black/50 z-50 flex items-end justify-center hidden">
+    <div class="modal-sheet rounded-t-3xl max-h-[92vh] overflow-y-auto">
+      <div class="modal-head">
+        <h3 id="modalDateTitle" class="font-bold text-[16px] text-slate-900">근무 및 일정 편집</h3>
+        <button onclick="closeEditModal()" class="modal-close" aria-label="닫기">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="p-4 space-y-3">
+        <div class="flex bg-slate-100 p-1 rounded-xl text-[14px] font-semibold">
+          <button type="button" id="tabModeSingle" onclick="setEditMode('single')" class="flex-1 min-h-[40px] rounded-lg bg-white shadow-xs text-indigo-700 transition">선택한 날짜만</button>
+          <button type="button" id="tabModeRange" onclick="setEditMode('range')" class="flex-1 min-h-[40px] rounded-lg text-slate-600 transition">기간 일괄 수정</button>
+        </div>
+
+        <p id="editManualNote" class="hidden text-[13px] text-violet-800 bg-violet-50 border border-violet-200 rounded-xl px-3 py-2"></p>
+
+        <div id="rangeDatePickerBox" class="hidden bg-indigo-50 p-3 rounded-2xl border border-indigo-200 space-y-2">
+          <span class="text-[14px] font-semibold text-indigo-900 flex items-center gap-1">
+            <i class="fa-solid fa-calendar-week text-indigo-600"></i> 일괄 적용 기간
+          </span>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="field-label" for="inputRangeStart">시작일</label>
+              <input type="date" id="inputRangeStart" class="field" />
+            </div>
+            <div>
+              <label class="field-label" for="inputRangeEnd">종료일</label>
+              <input type="date" id="inputRangeEnd" class="field" />
+            </div>
+          </div>
+          <div>
+            <span class="field-label">덮어쓸 항목</span>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 text-[14px] font-semibold">
+              <label class="flex items-center gap-1.5 min-h-[36px] text-blue-800" data-couple-only><input type="checkbox" id="chkRangeKyuho" checked class="w-5 h-5 accent-blue-600" />규호 근무</label>
+              <label class="flex items-center gap-1.5 min-h-[36px] text-rose-700"><input type="checkbox" id="chkRangeYejin" checked class="w-5 h-5 accent-rose-600" /><span data-personal-text="근무">예진 근무</span></label>
+              <label class="flex items-center gap-1.5 min-h-[36px] text-pink-700"><input type="checkbox" id="chkRangePlan" checked class="w-5 h-5 accent-pink-600" /><span data-personal-text="약속·메모">데이트·약속</span></label>
+            </div>
+          </div>
+          <p class="help text-indigo-800">※ 기간 안의 모든 날짜에 체크한 항목만 반영됩니다. (체크 안 한 항목은 그대로)</p>
+        </div>
+
+        <div class="section border-rose-200 bg-rose-50/50 space-y-2.5" data-couple-only>
+          <div class="section-title text-rose-700 !mb-0"><i class="fa-solid fa-heart"></i> 우리 둘의 데이트</div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="field-label" for="inputDateTimeStart">시작 시간</label>
+              <input type="time" id="inputDateTimeStart" class="field" />
+            </div>
+            <div>
+              <label class="field-label" for="inputDateTimeEnd">종료 시간</label>
+              <input type="time" id="inputDateTimeEnd" class="field" />
+            </div>
+          </div>
+          <div>
+            <label class="field-label" for="inputDateMemo">데이트 내용 / 장소</label>
+            <input type="text" id="inputDateMemo" placeholder="예: 18:30 저녁식사 & 산책 💖" class="field" />
+          </div>
+        </div>
+
+        <div class="section space-y-2.5">
+          <div class="section-title text-slate-800 !mb-0"><i class="fa-solid fa-calendar-plus"></i> <span data-personal-text="약속 · 메모">각자의 개인 약속</span></div>
+          <div data-couple-only>
+            <label class="field-label text-blue-800" for="inputMyPromise">이규호 개인 약속</label>
+            <input type="text" id="inputMyPromise" placeholder="예: 팀 회식 18:30" class="field" />
+          </div>
+          <div>
+            <label class="field-label text-rose-700" for="inputGfPromise" data-personal-text="{name} 약속 · 메모">이예진 개인 약속</label>
+            <input type="text" id="inputGfPromise" placeholder="예: 동기 모임 15:00" class="field" />
+          </div>
+        </div>
+
+        <!-- 규호 근무 수정 -->
+        <div class="section detail-person detail-person--k space-y-2.5" data-couple-only>
+          <div class="section-title text-blue-800 !mb-0">이규호 근무</div>
+          <div>
+            <label class="field-label" for="selectMyShiftType">근무 형태</label>
+            <select id="selectMyShiftType" onchange="onMyShiftTypeChange()" class="field">
+              <option value="조근">조근 (05~13)</option>
+              <option value="공휴일조근">공휴일조근 (05~09)</option>
+              <option value="석근">석근 (13~21)</option>
+              <option value="공휴일석근">공휴일석근 (15~21)</option>
+              <option value="석5">석5 (13~21, 석근과 같은 시간·다른 사무실)</option>
+              <option value="공휴일석5">공휴일석5 (15~21)</option>
+              <option value="석1">석1 (12~20)</option>
+              <option value="일근">일근 (09~18)</option>
+              <option value="O">O (쉬는날)</option>
+              <option value="대휴">대휴 (쉬는날)</option>
+              <option value="휴가">휴가 (쉬는날)</option>
+              <option value="연차">연차 (휴가)</option>
+              <option value="TS-3">TS-3</option>
+              <option value="TS-1">TS-1</option>
+              <option value="연수">연수</option>
+              <option value="기타">기타 (직접입력)</option>
+            </select>
+          </div>
+          <div id="wrapMyCustomShift" class="hidden">
+            <label class="field-label text-blue-800" for="inputMyShiftCustom">규호 직접입력 근무명</label>
+            <input type="text" id="inputMyShiftCustom" placeholder="예: TS-2, 특근, 세미나" class="field" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="field-label" for="inputMyTimeStart">시작</label>
+              <input type="time" id="inputMyTimeStart" class="field" />
+            </div>
+            <div>
+              <label class="field-label" for="inputMyTimeEnd">종료</label>
+              <input type="time" id="inputMyTimeEnd" class="field" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 예진 근무 수정 -->
+        <div class="section detail-person detail-person--y space-y-2.5">
+          <div class="section-title text-rose-700 !mb-0" data-personal-text="{name} 근무">이예진 근무</div>
+          <div>
+            <label class="field-label" for="selectGfShiftType">근무 형태</label>
+            <select id="selectGfShiftType" onchange="onGfShiftTypeChange()" class="field">
+              <option value="퀵턴">퀵턴 비행 (당일 왕복)</option>
+              <option value="체류">체류 비행 / L.O (스테이)</option>
+              <option value="OFF">OFF (휴무)</option>
+              <option value="SBY">SBY (자택대기)</option>
+              <option value="ISA">ISA (인천 SBY A)</option>
+              <option value="ISB">ISB (인천 SBY B)</option>
+              <option value="ISC">ISC (인천 SBY C)</option>
+              <option value="ISD">ISD (인천 SBY D)</option>
+              <option value="GSA">GSA (김포 SBY A 05~10)</option>
+              <option value="GSB">GSB (김포 SBY B)</option>
+              <option value="GSC">GSC (김포 SBY C)</option>
+              <option value="GSD">GSD (김포 SBY D)</option>
+              <option value="TR">TR (훈련 08~17)</option>
+              <option value="기타">기타 (직접입력)</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="inputGfDestination">도착지 / 도시명</label>
+            <input type="text" id="inputGfDestination" placeholder="예: 오사카, 다낭, 비슈케크, 부산" class="field font-semibold" />
+          </div>
+          <div id="gfFlightFields" class="space-y-2">
+            <div id="gfLeg1" class="leg-block" data-leg="1">
+              <div class="leg-head"><span>1레그</span></div>
+              <div class="space-y-1.5">
+                <div>
+                  <label class="sr-only" for="inputGfFlight">편명</label>
+                  <input type="text" id="inputGfFlight" placeholder="예: TW721 · 721/806 · 241/242/243" autocapitalize="characters" autocomplete="off" spellcheck="false" class="field" />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="field-label" for="inputGfFl1Std">이륙 (현지)</label>
+                    <input type="time" id="inputGfFl1Std" class="field" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="inputGfFl1Sta">착륙 (현지)</label>
+                    <input type="time" id="inputGfFl1Sta" class="field" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="gfLeg2" class="leg-block" data-leg="2">
+              <div class="leg-head"><span>2레그</span></div>
+              <div class="space-y-1.5">
+                <div>
+                  <label class="sr-only" for="inputGfFlight2">편명</label>
+                  <input type="text" id="inputGfFlight2" placeholder="예: TW806" autocapitalize="characters" autocomplete="off" spellcheck="false" class="field" />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="field-label" for="inputGfFl2Std">이륙 (현지)</label>
+                    <input type="time" id="inputGfFl2Std" class="field" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="inputGfFl2Sta">착륙 (현지)</label>
+                    <input type="time" id="inputGfFl2Sta" class="field" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="gfLeg3" class="leg-block hidden" data-leg="3">
+              <div class="leg-head"><span>3레그</span></div>
+              <div class="space-y-1.5">
+                <div>
+                  <label class="sr-only" for="inputGfFlight3">편명</label>
+                  <input type="text" id="inputGfFlight3" placeholder="예: TW806" autocapitalize="characters" autocomplete="off" spellcheck="false" class="field" />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="field-label" for="inputGfFl3Std">이륙 (현지)</label>
+                    <input type="time" id="inputGfFl3Std" class="field" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="inputGfFl3Sta">착륙 (현지)</label>
+                    <input type="time" id="inputGfFl3Sta" class="field" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="gfLeg4" class="leg-block hidden" data-leg="4">
+              <div class="leg-head"><span>4레그</span></div>
+              <div class="space-y-1.5">
+                <div>
+                  <label class="sr-only" for="inputGfFlight4">편명</label>
+                  <input type="text" id="inputGfFlight4" placeholder="예: TW806" autocapitalize="characters" autocomplete="off" spellcheck="false" class="field" />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <label class="field-label" for="inputGfFl4Std">이륙 (현지)</label>
+                    <input type="time" id="inputGfFl4Std" class="field" />
+                  </div>
+                  <div>
+                    <label class="field-label" for="inputGfFl4Sta">착륙 (현지)</label>
+                    <input type="time" id="inputGfFl4Sta" class="field" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="help">편명은 근무표 사진을 등록하면 자동으로 채워집니다. 잘못 읽었을 때만 고치세요 — <b>721/806</b> 처럼 첫 칸에 넣어도 레그별로 나눕니다(<b>241/242/243</b> → 3레그). 이륙·착륙은 알 때만 — 넣으면 AirLabs보다 먼저 보입니다.</p>
+          </div>
+          <div id="wrapGfCustomShift" class="hidden">
+            <label class="field-label text-rose-700" for="inputGfShiftCustom" data-personal-text="직접입력 근무명">예진 직접입력 근무명</label>
+            <input type="text" id="inputGfShiftCustom" placeholder="예: 청원휴가, 본사출장" class="field" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="field-label" for="inputGfTimeStart">출근 / 출발</label>
+              <input type="time" id="inputGfTimeStart" class="field" />
+            </div>
+            <div>
+              <label class="field-label" for="inputGfTimeEnd">퇴근 / 착륙</label>
+              <input type="time" id="inputGfTimeEnd" class="field" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sticky bottom-0 bg-white border-t border-slate-200 p-3">
+        <button onclick="saveModalChanges()" class="btn btn-primary w-full min-h-[52px] text-[16px]">
+          저장 완료
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 업로드 모달 -->
+  <div id="uploadModal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center hidden p-3">
+    <div class="modal-sheet rounded-3xl max-h-[90vh] overflow-y-auto">
+      <div class="modal-head">
+        <div class="min-w-0">
+          <h3 class="font-bold text-[16px] text-slate-900 flex items-center gap-1.5">
+            <i class="fa-solid fa-cloud-arrow-up text-indigo-600"></i>
+            <span id="modalTargetMonthTitle" class="text-indigo-700 font-bold">2026년 9월</span> 근무표 등록
+          </h3>
+          <span class="text-[12px] text-slate-500">올리면 바로 반영됩니다. 직접 입력한 칸(✋)은 그대로 둡니다.</span>
+        </div>
+        <button onclick="closeUploadModal()" class="modal-close" aria-label="닫기">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="p-4 space-y-3">
+        <div class="section flex items-center justify-between gap-2 !py-2.5">
+          <span class="text-[14px] font-semibold text-slate-800 whitespace-nowrap">📅 대상 월</span>
+          <div class="flex gap-1.5">
+            <select id="selectUploadYear" onchange="onMonthSelectorChange()" class="field !w-auto !h-10 font-semibold"></select>
+            <select id="selectUploadMonth" onchange="onMonthSelectorChange()" class="field !w-auto !h-10 font-semibold">
+              <option value="1">1월</option><option value="2">2월</option><option value="3">3월</option>
+              <option value="4">4월</option><option value="5">5월</option><option value="6">6월</option>
+              <option value="7">7월</option><option value="8">8월</option><option value="9">9월</option>
+              <option value="10">10월</option><option value="11">11월</option><option value="12">12월</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="section detail-person detail-person--k space-y-2" data-couple-only>
+          <div class="flex justify-between items-center gap-2">
+            <span class="text-[14px] font-bold text-blue-800 flex items-center gap-1.5">
+              <i class="fa-solid fa-user-gear"></i> 1. 이규호 근무표 (<span class="uploadTargetMonthText">9월</span>)
+            </span>
+            <span id="statusKyuhoMonthCount" class="text-[12px] text-blue-800 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap">등록됨</span>
+          </div>
+          <!-- v2.5.2: 현재 파일 = 사람·달 라벨(주) + 파일 이름(보조). 규호는 엑셀/사진 모양 아이콘 (규호 사진은 보관하지 않아 썸네일 없음) -->
+          <div id="kyuhoCurrentFile" class="cur-file" data-state="loading">
+            <span id="kyuhoCurThumb" class="cur-thumb" aria-hidden="true"><i class="fa-solid fa-file-excel"></i></span>
+            <div class="cur-text">
+              <div id="kyuhoCurLabel" class="cur-label">확인 중…</div>
+              <div id="kyuhoAppliedFileName" class="cur-sub"></div>
+            </div>
+          </div>
+          <p id="kyuhoSelectedFileName" class="help hidden" role="status"></p>
+          <input type="file" id="kyuhoFile" onchange="onFileSelected('kyuho')" accept=".xlsx, .xls, .csv, image/jpeg, image/png, image/*" class="block w-full text-[13px] text-slate-600 file:mr-2 file:min-h-[40px] file:px-3 file:rounded-lg file:border-0 file:text-[13px] file:font-semibold file:bg-blue-600 file:text-white" />
+          <p class="help">엑셀 파일 또는 근무표 캡처 사진(jpg/png). 사진은 Gemini 가 '이규호' 행만 읽습니다.</p>
+          <div class="text-right"><button type="button" onclick="previewUploadFiles()" class="preview-first-link" data-preview-link="kyuho">결과 먼저 보기</button></div>
+        </div>
+
+        <div class="section detail-person detail-person--y space-y-2">
+          <div class="flex justify-between items-center gap-2">
+            <span class="text-[14px] font-bold text-rose-700 flex items-center gap-1.5">
+              <i class="fa-solid fa-image"></i> <span data-personal-text="내 근무표 사진 (">2. 이예진 스케줄 사진 (</span><span class="uploadTargetMonthText">9월</span>)
+            </span>
+            <span id="statusYejinMonthCount" class="text-[12px] text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full font-semibold whitespace-nowrap">등록됨</span>
+          </div>
+          <!-- v2.5.2: 현재 사진 = 썸네일(누르면 사진 뷰어) + '2026년 12월 예진 스케줄'(주) + 파일 이름(보조) -->
+          <div id="yejinCurrentFile" class="cur-file" data-state="loading">
+            <button type="button" id="yejinCurThumb" class="cur-thumb" onclick="openUploadTargetPhoto()" aria-label="예진 스케줄 사진 크게 보기" data-personal-aria="근무표 사진 크게 보기" disabled>
+              <img id="yejinCurThumbImg" alt="" class="hidden" />
+              <i class="fa-solid fa-image" id="yejinCurThumbIcon"></i>
+            </button>
+            <div class="cur-text">
+              <div id="yejinCurLabel" class="cur-label">확인 중…</div>
+              <div id="yejinAppliedFileName" class="cur-sub"></div>
+              <button type="button" id="yejinCurViewBtn" onclick="openUploadTargetPhoto()" class="cur-view hidden">사진 크게 보기</button>
+            </div>
+          </div>
+          <p id="yejinSelectedFileName" class="help hidden" role="status"></p>
+          <p class="help" data-personal-only>티웨이 승무원 근무표 캡처 사진(jpg/png). Gemini 가 날짜별 근무·편명·시간을 읽습니다.</p>
+          <input type="file" id="yejinImageFile" onchange="onFileSelected('yejin')" accept="image/*" class="block w-full text-[13px] text-slate-600 file:mr-2 file:min-h-[40px] file:px-3 file:rounded-lg file:border-0 file:text-[13px] file:font-semibold file:bg-rose-600 file:text-white" />
+          <div class="text-right"><button type="button" onclick="previewUploadFiles()" class="preview-first-link" data-preview-link="yejin">결과 먼저 보기</button></div>
+          <!-- v2.5.1: 이미 등록한 달의 편명이 비었을 때 — 저장된 사진으로 편명만 다시 읽음 (사진을 다시 고를 필요 없음) -->
+          <div class="text-right"><button type="button" id="btnRereadFromModal" onclick="rereadFlightsFromModal()" class="preview-first-link" data-reread-link="yejin">이 달 편명만 다시 읽기</button></div>
+          <p id="rereadFlightsStatus" class="help hidden" role="status" aria-live="polite"></p>
+
+          <div class="pt-1 border-t border-slate-100">
+            <div class="flex items-center justify-between">
+              <span class="text-[13px] text-slate-700 font-semibold"><i class="fa-solid fa-wand-magic-sparkles text-indigo-600 mr-1"></i>Gemini 사진 자동 인식</span>
+              <button type="button" onclick="toggleApiKeyInput()" class="text-indigo-700 font-semibold underline text-[13px] min-h-[36px] px-1">설정</button>
+            </div>
+            <div id="apiKeyInputBox" class="mt-1 space-y-2">
+              <input type="password" id="geminiApiKey" oninput="onApiKeyChanged()" onchange="onApiKeyChanged()" placeholder="Google AI Studio 무료 API 키 (AIzaSy...)" class="field" />
+              <div class="flex items-center gap-2">
+                <label class="text-[13px] text-slate-600 shrink-0 font-semibold" for="geminiModel">모델</label>
+                <input type="text" id="geminiModel" onchange="onGeminiModelChanged()" placeholder="gemini-3.6-flash" autocapitalize="off" spellcheck="false" class="field font-mono" />
+              </div>
+              <p class="help">모델이 단종(404)되면 사용 가능한 flash 모델로 자동 전환합니다.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="section space-y-2">
+          <div class="flex justify-between items-center">
+            <span class="text-[14px] font-semibold text-slate-800" data-personal-text="✍️ 간편 텍스트 등록 (선택)">✍️ 간편 텍스트 등록 (예진, 선택)</span>
+          </div>
+          <textarea id="quickScheduleInput" rows="2" placeholder="예: 3 오사카, 4-7 다낭, 8 OFF, 10 구마모토, 12-14 SBY, 15 GSA, 25-28 로마, 29-30 OFF" class="field"></textarea>
+          <div class="text-right"><button type="button" onclick="previewUploadFiles()" class="preview-first-link" data-preview-link="text">결과 먼저 보기</button></div>
+        </div>
+
+        <div id="ocrProgressBox" class="hidden space-y-1.5 bg-indigo-50 p-3 rounded-2xl border border-indigo-200">
+          <div class="flex justify-between text-[13px] font-semibold text-indigo-800">
+            <span id="ocrStatusText">분석 중...</span>
+            <span id="ocrPercent">0%</span>
+          </div>
+          <div class="w-full bg-indigo-200 h-2 rounded-full overflow-hidden">
+            <div id="ocrProgressBar" class="bg-indigo-600 h-full w-0 transition-all duration-300"></div>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <button type="button" onclick="clearTargetMonthData()" class="btn btn-ghost w-1/3 text-[14px]">
+            해당 월 비우기
+          </button>
+          <button type="button" onclick="processUploadFiles()" id="btnStartScan" class="btn btn-brand w-2/3 text-[15px]">
+            <i class="fa-solid fa-magnifying-glass"></i> 반영
+          </button>
+        </div>
+
+        <div class="section border-indigo-200 bg-indigo-50/40 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[14px] font-semibold text-indigo-900"><i class="fa-solid fa-rotate text-indigo-600 mr-1"></i><span data-personal-text="폰·PC 동기화">두 사람 실시간 동기화</span></span>
+            <div class="flex items-center gap-1.5">
+              <button type="button" onclick="manualSyncNow()" class="text-[13px] bg-indigo-600 text-white px-3 min-h-[36px] rounded-lg font-semibold">지금 동기화</button>
+              <button type="button" onclick="toggleCloudSyncInput()" class="text-indigo-700 font-semibold underline text-[13px] min-h-[36px] px-1">설정</button>
+            </div>
+          </div>
+          <div id="cloudSyncInputBox" class="space-y-2">
+            <p class="help" data-personal-only>본인이 만든 Firebase 프로젝트로 폰과 PC 를 맞춥니다(만드는 법은 받은 안내 문서). 비워 두면 이 기기에만 저장됩니다.</p>
+            <label class="field-label" for="firebaseDbUrl" data-personal-only>내 Firebase 주소 (Realtime Database URL)</label>
+            <input type="text" id="firebaseDbUrl" onchange="onFirebaseUrlChanged()" oninput="onFirebaseUrlChanged()" placeholder="https://yktable-f14fe-default-rtdb.asia-southeast1.firebasedatabase.app/" data-personal-placeholder="https://내프로젝트-default-rtdb.asia-southeast1.firebasedatabase.app/" class="field font-mono !text-[14px]" />
+            <div data-personal-only class="space-y-1">
+              <label class="field-label" for="fbApiKey">내 Firebase 웹 API 키 (프로젝트 설정 › 일반 › 웹 API 키)</label>
+              <input type="text" id="fbApiKey" oninput="onFbApiKeyChanged()" onchange="onFbApiKeyChanged()" placeholder="AIzaSy…" autocomplete="off" autocapitalize="off" spellcheck="false" class="field font-mono !text-[14px]" />
+              <p id="fbApiKeyStatus" class="help" aria-live="polite"></p>
+            </div>
+            <div id="fbLoginBox" class="space-y-2">
+              <p id="fbLoginStatus" class="text-[13px] font-semibold text-slate-600">동기화 계정: 로그인 안 됨</p>
+              <p class="help" data-personal-only>내 계정 = 내 Firebase 프로젝트의 Authentication 에 만든 이메일/비밀번호 계정 1개.</p>
+              <div id="fbLoginForm" class="space-y-2">
+                <input type="email" id="fbLoginEmail" autocomplete="username" placeholder="동기화 계정 이메일" data-personal-placeholder="내 계정 이메일" class="field" />
+                <input type="password" id="fbLoginPw" autocomplete="current-password" placeholder="비밀번호" class="field" />
+                <button type="button" onclick="fbLoginFromForm()" class="btn btn-brand w-full">로그인</button>
+              </div>
+              <button type="button" id="fbLogoutBtn" onclick="fbLogout()" class="hidden text-[13px] text-slate-600 underline min-h-[36px]"><span data-personal-text="로그아웃 · 다른 계정으로 바꾸기">로그아웃</span></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- AirLabs (v2.3.0: Gemini 설정과 분리 — 접어 둔 Gemini 칸 안에 숨지 않게 항상 보임) -->
+        <div id="airlabsSection" class="section space-y-1.5">
+          <span class="section-title !mb-1">✈️ AirLabs (비행 시각 조회, 선택)</span>
+          <label class="field-label" for="airlabsApiKey">AirLabs API 키 — airlabs.co 무료 키를 붙여 넣으세요 (Gemini 키와 다름)</label>
+          <input type="password" id="airlabsApiKey" oninput="onAirlabsKeyChanged(event)" onchange="onAirlabsKeyChanged(event)" placeholder="예: 1a2b3c4d-…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" class="field" />
+          <p id="airlabsKeyStatus" class="text-[13px] font-semibold text-slate-500" aria-live="polite"></p>
+          <p id="airlabsKeyWarn" class="text-[13px] font-semibold text-amber-700 hidden" aria-live="polite"></p>
+          <div class="flex items-center gap-2 flex-wrap">
+            <button type="button" id="btnAirlabsPing" onclick="checkAirlabsConnection()" class="btn btn-line !min-h-[40px] !text-[14px]">연결 확인</button>
+            <span class="help">키가 맞는지 AirLabs 에 한 번 물어봅니다 (요청 1회)</span>
+          </div>
+          <p id="airlabsPingResult" class="help" aria-live="polite"></p>
+          <p id="airlabsUsageText" class="help"></p>
+          <p class="help" data-personal-text="키는 이 기기에만 저장됩니다. 붙여 넣으면 바로 저장되고, 상세 카드 비행 상자의 [비행정보 확인]을 눌렀을 때만 사용합니다.">키는 이 폰에만 저장됩니다. 붙여 넣으면 바로 저장되고, 상세 카드 비행 상자의 [비행정보 확인]을 눌렀을 때만 사용합니다.</p>
+        </div>
+
+        <div id="ownerNameSection" class="section space-y-1.5" data-personal-only>
+          <label class="section-title !mb-1" for="ownerNameInput"><i class="fa-solid fa-user text-indigo-600 mr-1"></i>내 이름 (달력·상세 카드에 표시)</label>
+          <input type="text" id="ownerNameInput" oninput="onOwnerNameChanged()" onchange="onOwnerNameChanged()" maxlength="12" placeholder="나" class="field" />
+          <p class="help">이 기기에만 저장됩니다. 비우면 '나'.</p>
+        </div>
+
+        <div class="section space-y-2">
+          <span class="text-[14px] font-semibold text-slate-800"><i class="fa-solid fa-box-archive text-slate-500 mr-1"></i>데이터 백업 / 복원</span>
+          <div class="flex gap-2">
+            <button type="button" id="btnDownloadBackup" onclick="downloadBackup()" class="btn btn-line flex-1 text-[13px]">
+              <i class="fa-solid fa-download"></i>백업 다운로드
+            </button>
+            <button type="button" id="btnRestoreBackup" onclick="openRestorePicker()" class="btn btn-line flex-1 text-[13px] !text-rose-700 !border-rose-200">
+              <i class="fa-solid fa-upload"></i>백업에서 복원
+            </button>
+          </div>
+          <input type="file" id="backupFileInput" accept=".json,application/json" class="hidden" onchange="onBackupFileSelected()" />
+          <p class="help" data-personal-text="근무표·기념일 전체를 파일로 저장합니다(근무표 사진 제외). 복원하면 이 기기와 서버(내 다른 기기 포함)의 데이터가 백업 내용으로 바뀝니다.">근무표·기념일 전체를 파일로 저장합니다(스케줄 사진 제외). 복원하면 이 폰과 서버(상대방 폰 포함)의 데이터가 백업 내용으로 바뀝니다.</p>
+
+          <div id="appVersionBox" class="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
+            <span id="appVersionText" class="help !mt-0">앱 버전 확인 중…</span>
+            <button type="button" id="btnCheckUpdate" onclick="checkForUpdate()" class="btn btn-line text-[12px] whitespace-nowrap">
+              <i class="fa-solid fa-rotate"></i>업데이트 확인
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 기념일 모달 -->
+  <div id="anniversaryModal" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-white w-full max-w-md rounded-3xl p-5 space-y-4 max-h-[85vh] overflow-y-auto shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="font-semibold text-base text-slate-800 flex items-center gap-1.5">
+          <i class="fa-solid fa-cake-candles text-amber-500"></i> <span data-personal-text="내 기념일">우리의 기념일 & D-Day</span>
+        </h3>
+        <button onclick="closeAnniversaryModal()" class="modal-close" aria-label="닫기">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="bg-amber-50 p-3 rounded-2xl border border-amber-200 text-[14px] space-y-1" data-couple-only>
+        <span class="font-semibold text-amber-900 block">💖 만난 날: 2025년 12월 23일 (1일)</span>
+        <span id="modalDDayText" class="text-amber-700 font-semibold">계산 중...</span>
+      </div>
+
+      <div class="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
+        <span class="text-[14px] font-semibold text-slate-800 block" data-personal-text="기념일 추가 (생일·입사일 등)">기념일 추가 (생일, 결혼기념일 등)</span>
+        <div class="grid grid-cols-2 gap-2">
+          <input type="text" id="customAnivName" placeholder="기념일명 (예: 예진 생일)" data-personal-placeholder="기념일명 (예: 엄마 생일)" class="field" />
+          <input type="date" id="customAnivDate" class="field" />
+        </div>
+        <div class="flex items-center space-x-2 pt-0.5">
+          <input type="checkbox" id="customAnivRepeat" checked class="w-5 h-5 accent-rose-600" />
+          <label for="customAnivRepeat" class="text-[14px] font-semibold text-slate-700 cursor-pointer">
+            매년 같은 날짜에 반복 (생일 등)
+          </label>
+        </div>
+        <button onclick="addCustomAnniversary()" class="btn w-full bg-amber-600 text-white">
+          기념일 등록
+        </button>
+      </div>
+
+      <div class="space-y-1.5 text-[14px]">
+        <span class="font-semibold text-slate-800 block">등록된 기념일 목록</span>
+        <div id="customList" class="space-y-1 max-h-40 overflow-y-auto"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. 원본 사진 뷰어 모달 -->
+  <div id="yejinImageModal" class="fixed inset-0 bg-black/85 z-50 flex items-center justify-center hidden p-2 sm:p-4">
+    <div class="bg-white w-full max-w-md rounded-3xl p-4 space-y-3 max-h-[95vh] flex flex-col shadow-2xl">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+        <div>
+          <h3 id="yejinImageModalTitle" class="font-semibold text-sm text-slate-800 flex items-center gap-1.5">
+            <i class="fa-solid fa-image text-rose-500"></i> <span data-personal-text="내 근무표 원본 사진">이예진 원본 스케줄 사진</span>
+          </h3>
+          <span class="text-[10px] text-slate-400">초고화질 원본으로 확대해도 글자가 또렷합니다.</span>
+        </div>
+        <button onclick="closeYejinImageModal()" class="modal-close" aria-label="닫기">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="flex items-center justify-between bg-slate-100 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600">
+        <div class="flex items-center space-x-2">
+          <button onclick="zoomImage(0.25)" class="px-2.5 min-h-[36px] bg-white rounded-lg border border-slate-300"><i class="fa-solid fa-magnifying-glass-plus mr-1"></i>확대</button>
+          <button onclick="zoomImage(-0.25)" class="px-2.5 min-h-[36px] bg-white rounded-lg border border-slate-300"><i class="fa-solid fa-magnifying-glass-minus mr-1"></i>축소</button>
+          <button onclick="resetZoomImage()" class="px-2.5 min-h-[36px] bg-white rounded-lg border border-slate-300">초기화</button>
+        </div>
+        <button onclick="openOriginalImageInNewTab()" class="text-indigo-600 underline text-[11px]"><i class="fa-solid fa-arrow-up-right-from-square mr-1"></i>새창에서 크게보기</button>
+      </div>
+
+      <div class="flex-1 overflow-auto rounded-xl bg-slate-900 flex items-center justify-center p-1 border border-slate-200 relative">
+        <img id="yejinOriginalImgTag" src="" alt="예진 스케줄 사진" class="w-full h-auto object-contain rounded-lg transition-transform duration-200 origin-center hidden" />
+        <div id="yejinNoImgAlert" class="text-center p-6 space-y-2 bg-white rounded-xl">
+          <i class="fa-regular fa-image text-slate-300 text-4xl block"></i>
+          <p class="text-xs text-slate-500 font-semibold" id="yejinNoImgAlertText">등록된 스케줄 원본 사진이 없습니다.</p>
+          <p class="text-[10px] text-slate-400" data-personal-text="'근무표 등록'에서 사진을 올리면 폰·PC 어디서나 크게 볼 수 있습니다.">'근무표 등록'에서 사진을 올리시면 두 사람 모두 실시간으로 크게 볼 수 있습니다.</p>
+        </div>
+      </div>
+
+      <div class="pt-1">
+        <button onclick="closeYejinImageModal()" class="btn btn-primary w-full">
+          닫기
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. 등록 미리보기 (엑셀 · 규호 사진 · 예진 사진 · 간편 텍스트 공용) -->
+  <div id="recognizePreviewModal" class="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center hidden p-2">
+    <div class="modal-sheet rounded-3xl max-h-[94vh] flex flex-col overflow-hidden">
+      <div class="modal-head !static">
+        <div class="min-w-0">
+          <h3 id="previewTitle" class="font-bold text-[16px] text-slate-900">등록 미리보기</h3>
+          <p id="previewSubtitle" class="text-[12px] text-slate-600 truncate"></p>
+          <p id="previewModelInfo" class="text-[12px] text-indigo-700 font-semibold"></p>
+        </div>
+        <button type="button" onclick="cancelRecognizePreview()" class="modal-close" aria-label="닫기">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="px-3 pt-2.5 space-y-2">
+        <p class="text-[13px] text-slate-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 leading-relaxed" data-personal-text="[결과 먼저 보기] — 체크한 칸만 바뀝니다. ✋ 직접 입력한 칸과 근무표 빈칸은 기본으로 그대로 두고, 약속·메모는 건드리지 않아요. [반영]을 눌러야 저장됩니다.">[결과 먼저 보기] — 체크한 칸만 바뀝니다. <b>✋ 직접 입력</b>한 칸과 근무표 <b>빈칸</b>은 기본으로 그대로 두고, 데이트·약속·상대 근무는 건드리지 않아요. <b>[반영]</b>을 눌러야 저장됩니다.</p>
+        <p id="previewSummary" class="text-[13px] font-semibold text-slate-800"></p>
+        <p id="previewWarn" class="hidden text-[13px] text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2"></p>
+        <label id="previewShowSameWrap" class="hidden flex items-center gap-2 text-[13px] text-slate-700 font-semibold min-h-[36px]"><input type="checkbox" id="previewShowSame" class="w-5 h-5 accent-indigo-600" /><span id="previewShowSameText">변경 없는 날도 보기</span></label>
+      </div>
+      <div class="flex-1 min-h-0 overflow-y-auto mx-3 mt-2 border border-slate-200 rounded-2xl">
+        <table class="w-full">
+          <tbody id="previewTableBody"></tbody>
+        </table>
+      </div>
+      <div class="flex gap-2 p-3">
+        <button type="button" id="btnPreviewCancel" onclick="cancelRecognizePreview()" class="btn btn-ghost w-1/3">취소</button>
+        <button type="button" id="btnPreviewApply" onclick="applyRecognizePreview()" class="btn btn-brand w-2/3">
+          <i class="fa-solid fa-check"></i> 반영 (<span id="previewCount">0</span>건)
+        </button>
+      </div>
+      <datalist id="previewGfTypes"><option value="OFF"></option><option value="체류"></option><option value="퀵턴"></option><option value="SBY"></option><option value="ISA"></option><option value="ISB"></option><option value="ISC"></option><option value="ISD"></option><option value="GSA"></option><option value="GSB"></option><option value="GSC"></option><option value="GSD"></option><option value="TR"></option></datalist>
+      <datalist id="previewMyTypes"><option value="조근"></option><option value="공휴일조근"></option><option value="석근"></option><option value="공휴일석근"></option><option value="석5"></option><option value="공휴일석5"></option><option value="석1"></option><option value="일근"></option><option value="O"></option><option value="대휴"></option><option value="휴가"></option><option value="연차"></option><option value="TS-3"></option><option value="-"></option></datalist>
+    </div>
+  </div>
+
+  <!-- 7. 개인 모드 첫 실행 안내 (v2.6.0) — 커플 모드에서는 항상 숨김(data-personal-only) -->
+  <div id="onboardingModal" data-personal-only class="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center hidden p-4" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+    <div class="bg-white w-full max-w-md rounded-3xl p-5 space-y-4 shadow-2xl">
+      <h3 id="onboardingTitle" class="font-bold text-[17px] text-slate-900 flex items-center gap-2"><i class="fa-solid fa-plane-departure text-indigo-600"></i>내 스케줄에 오신 걸 환영해요</h3>
+      <p class="text-[14px] text-slate-700 leading-relaxed">티웨이 승무원 근무표를 사진 한 장으로 달력에 옮겨 주는 개인용 스케줄러입니다. 근무 코드·편명·레그·비행 정보는 티웨이 근무표 형식 그대로 읽습니다.</p>
+      <div>
+        <label class="field-label" for="onboardingName">달력에 보일 내 이름</label>
+        <input type="text" id="onboardingName" maxlength="12" placeholder="나" class="field" />
+        <p class="help">비워 두면 '나'로 보입니다. 나중에 [등록] 창 아래 '내 이름'에서 바꿀 수 있어요.</p>
+      </div>
+      <p class="help">폰과 PC 를 맞추려면 [등록] 창의 '폰·PC 동기화'에 내 Firebase 주소·웹 API 키·계정을 넣으세요. 넣지 않으면 이 기기에만 저장됩니다.</p>
+      <button type="button" id="btnFinishOnboarding" onclick="finishOnboarding()" class="btn btn-brand w-full min-h-[48px] text-[15px]">시작하기</button>
+    </div>
+  </div>
+
+  <!-- 6. 반영 결과 바 (v2.4.6): 바로 반영한 뒤 한 줄 요약 + [되돌리기](10분) -->
+  <div id="applyBar" class="apply-bar hidden" role="status" aria-live="polite">
+    <div class="apply-bar__inner">
+      <p id="applyBarText" class="apply-bar__text"></p>
+      <div class="apply-bar__btns">
+        <button type="button" id="btnRereadFlights" onclick="rereadFlights()" class="apply-bar__btn apply-bar__btn--reread hidden">편명 다시 읽기</button>
+        <button type="button" id="btnApplyDetail" onclick="toggleApplyDetails()" class="apply-bar__btn hidden">자세히</button>
+        <button type="button" id="btnUndoUpload" onclick="undoLastUpload()" class="apply-bar__btn apply-bar__btn--undo hidden"><i class="fa-solid fa-rotate-left"></i> 되돌리기</button>
+        <button type="button" id="btnApplyClose" onclick="dismissApplyBar()" class="apply-bar__close" aria-label="닫기"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <ul id="applyBarDetails" class="apply-bar__details hidden"></ul>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

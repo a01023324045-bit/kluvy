@@ -23,6 +23,7 @@ import { rereadFlightsFromBar, rereadFlightsFromModal } from './ui/reread-flight
 import { cancelRecognizePreview, applyRecognizePreview } from './ui/recognize-preview.js';
 import { fbLoginFromForm, fbLogout } from './ui/login.js';
 import { downloadBackup, openRestorePicker, onBackupFileSelected } from './ui/backup-ui.js';
+import { finishOnboarding, onOwnerNameChanged, onFbApiKeyChanged } from './ui/personal.js';
 
 export const handlers = {
   // 헤더 / 달력
@@ -46,5 +47,7 @@ export const handlers = {
   // 로그인
   fbLoginFromForm, fbLogout,
   // 백업 / 복원
-  downloadBackup, openRestorePicker, onBackupFileSelected
+  downloadBackup, openRestorePicker, onBackupFileSelected,
+  // 개인 모드 (v2.6.0): 첫 실행 이름 입력 · 설정의 내 이름 · 내 Firebase 웹 API 키 (커플 모드 화면에는 없음)
+  finishOnboarding, onOwnerNameChanged, onFbApiKeyChanged
 };

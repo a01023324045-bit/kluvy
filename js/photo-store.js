@@ -9,8 +9,11 @@
 //
 // 이 파일의 '대역(backend)'은 { get, put, delete, keys } 를 가진 객체 — 브라우저는 IndexedDB, 테스트·IndexedDB 불가 시 메모리.
 
-export const LEGACY_PHOTO_PREFIX = 'yejin_sched_img_';
-export const PHOTO_DB_NAME = 'kluvy';
+import { IS_PERSONAL, modeKey } from './config.js';
+
+// v2.6.0: 개인 모드는 IndexedDB 이름·옛 사진 키도 따로 (같은 폰의 커플 앱 사진을 가져오거나 지우지 않게)
+export const LEGACY_PHOTO_PREFIX = modeKey('yejin_sched_img_');
+export const PHOTO_DB_NAME = IS_PERSONAL ? modeKey('photos') : 'kluvy';
 export const PHOTO_STORE = 'photos';
 
 /** 메모리 대역 (테스트, IndexedDB 를 못 쓰는 브라우저) */

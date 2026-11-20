@@ -1,0 +1,332 @@
+// 근무표 등록 미리보기 (엑셀 · 규호 근무표 사진 · 예진 스케줄 사진 · 간편 텍스트 공용)
+// v2.4.6: 선택 기능 — 등록 모달의 [결과 먼저 보기] 를 눌렀을 때만 열린다 (기본은 미리보기 없이 바로 반영).
+//        날짜·사람마다 '기존 값 → 새 값'과 상태를 보여 주고, 수동 입력과 다른 칸은 '✋ 수동 입력 유지'(기본, 체크하면 덮어쓰기),
+//        근무표 빈칸은 '기존 값 유지'(체크하면 지우기), 내용이 같은 날은 '변경 없음'(기본 숨김). [반영]을 눌러야 저장된다.
+// 데이터는 모두 textContent / input.value 로만 넣는다 (innerHTML 에 사진에서 읽은 글자를 넣지 않음).
+import { weekdayOfKey } from '../dates.js';
+import { personName } from '../app-mode.js';
+import { stayKstInfo } from '../timezone.js';
+import { isFlightDuty } from './flight-card.js';
+import { gfFlights, flightLabel, flightFieldsFromInputs, MAX_LEGS } from '../flight.js';
+import { mapGeminiItem } from '../parsers/gemini-yejin.js';
+import { dutyExtrasLines } from '../title-format.js';
+import { parseKyuhoShiftRule } from '../parsers/excel-kyuho.js';
+import { STATUS_LABEL, CHECK_MEANING, describeDuty, summarizeRows, isBlankDuty } from '../upload-merge.js';
+
+const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+let current = null; // { rows, onApply, onCancel, showSame }
+
+/** v2.4.0 미리보기 행의 편명 칸 수: 읽은 레그 수만큼(최소 2, 최대 MAX_LEGS=4) */
+export function previewLegSlots(legCount) {
+  return Math.min(MAX_LEGS, Math.max(2, Number(legCount) || 0));
+}
+
+/** 편명 칸 값들 → 요약 '전체 3레그 · TW705 · TW706 · TW711' / '편명 없음' (입력하면 바로 갱신) */
+export function legSummaryText(values) {
+  const v = values || [];
+  const f = flightFieldsFromInputs({ f1: v[0] || '', f2: v[1] || '', f3: v[2] || '', f4: v[3] || '' });
+  const list = f.flights ? f.flights.map(l => l.no) : (f.flight ? [String(f.flight).split(' ')[0]] : []);
+  return { text: list.length ? `전체 ${list.length}레그 · ${list.join(' · ')}` : '편명 없음', count: list.length };
+}
+
+/**
+ * v2.4.4 미리보기 한 행에 보일 내용 (순수 함수 — 단위 테스트가 픽스처와 비교)
+ *  { flightRow, inputs:['TW705 GMP-CJU', …], summary, extras:[{kind,text}], warnings:[…] }
+ *  - 비행편 칸은 그날 시작하는 비행편만, L/O·TRAIN·전날 출발 비행은 extras(비행편 칸·비행 상자에 넣지 않음)
+ */
+export function previewRowView(row) {
+  const v = (row && row.value) || {};
+  const flightRow = Boolean(row && row.who === 'gf' && isFlightDuty(v));
+  const legs = flightRow ? gfFlights(v) : [];
+  const inputs = [];
+  if (flightRow) for (let i = 0; i < previewLegSlots(legs.length); i++) inputs.push(legs[i] ? flightLabel(legs[i]) : (i === 0 ? String(v.flight || '') : ''));
+  return {
+    flightRow,
+    inputs,
+    summary: flightRow ? legSummaryText(inputs).text : '',
+    extras: row && row.who === 'gf' ? dutyExtrasLines(v) : [],
+    warnings: (row && Array.isArray(row.warnings)) ? row.warnings.slice() : []
+  };
+}
+
+/** 미리보기 행 + 사용자가 고친 값 → 저장할 값 (순수 함수, 테스트용) */
+export function finalizePreviewRow(row, edits = {}) {
+  const type = edits.type !== undefined ? String(edits.type).trim() : undefined;
+  const start = edits.start !== undefined ? String(edits.start).trim() : undefined;
+  const end = edits.end !== undefined ? String(edits.end).trim() : undefined;
+  const dest = edits.destination !== undefined ? String(edits.destination).trim() : undefined;
+  // v2.4.0: 편명은 레그별 칸 최대 4개 (flight·flight2·flight3·flight4) → { flight, flights }
+  const FL_KEYS = ['flight', 'flight2', 'flight3', 'flight4'];
+  const flightEdited = FL_KEYS.some(k => edits[k] !== undefined);
+  const legs0 = gfFlights(row.value);
+  const fv = i => (edits[FL_KEYS[i]] !== undefined ? edits[FL_KEYS[i]] : (legs0[i] ? flightLabel(legs0[i]) : (i === 0 ? String(row.value.flight || '') : '')));
+  const fl = flightEdited ? flightFieldsFromInputs({ f1: fv(0), f2: fv(1), f3: fv(2), f4: fv(3) }) : null;
+  const flight = fl ? fl.flight : undefined;
+  const typeChanged = type !== undefined && type !== String(row.value.type || '');
+  if (row.who === 'my') {
+    let v = typeChanged ? parseKyuhoShiftRule(type, row.dateKey) : { ...row.value };
+    if (start !== undefined && start !== (row.value.start || '')) v = { ...v, start };
+    if (end !== undefined && end !== (row.value.end || '')) v = { ...v, end };
+    return v;
+  }
+  if (typeChanged) {
+    // v2.4.4: 사람이 근무 형태를 바꿨으면 칸 글자(cellText·blocks)로 다시 판정하지 않고 입력값으로만 매핑,
+    //         L/O·TRAIN·전날 출발 비행 기록은 비행 근무로 남을 때만 이어 받음
+    const { cellText, blocks, flights: rawFlights, layovers, trains, ...rawRest } = row.raw || {}; // eslint-disable-line no-unused-vars
+    const m = mapGeminiItem({ ...rawRest, flights: gfFlights(row.value).map(flightLabel), type, start: start ?? row.value.start ?? '', end: end ?? row.value.end ?? '', destination: dest ?? row.value.destination ?? '', flight: flight ?? row.value.flight ?? '' });
+    if (fl && 'flight' in m) { m.flight = fl.flight; if (fl.flights) m.flights = fl.flights; else delete m.flights; }
+    const keepExtras = m.type === '체류' || m.type === '퀵턴';
+    for (const k of ['layovers', 'trains', 'carryIn']) { if (keepExtras && row.value[k]) m[k] = row.value[k]; else delete m[k]; }
+    return m;
+  }
+  const v = { ...row.value };
+  if (start !== undefined) v.start = start;
+  if (end !== undefined) v.end = end;
+  if (dest !== undefined && 'destination' in row.value) v.destination = dest;
+  if (fl) { // v2.3.0: 편명 직접 입력·수정 (v2.3.1: 가는 편·오는 편)
+    v.flight = fl.flight;
+    if (fl.flights) v.flights = fl.flights; else delete v.flights;
+  }
+  if ((start !== undefined || end !== undefined) && v.timesFrom) delete v.timesFrom; // 직접 고쳤으면 시간표 표시 해제
+  return v;
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function input(cls, value, attrs = {}) {
+  const i = document.createElement('input');
+  i.type = 'text';
+  i.className = cls;
+  i.value = value || '';
+  for (const [k, v] of Object.entries(attrs)) i.setAttribute(k, v);
+  return i;
+}
+
+const STATUS_CLASS = {
+  new: 'pv-badge pv-badge--new',
+  change: 'pv-badge pv-badge--change',
+  same: 'pv-badge pv-badge--same',
+  manual: 'pv-badge pv-badge--manual',
+  'blank-keep': 'pv-badge pv-badge--blank',
+  blank: 'pv-badge pv-badge--blank'
+};
+
+function updateCount() {
+  const n = current ? current.rows.filter(r => r.include && (r.status !== 'blank' || (r.edits.type || '').trim())).length : 0;
+  const c = document.getElementById('previewCount');
+  if (c) c.textContent = String(n);
+}
+
+function applyVisibility() {
+  if (!current) return;
+  document.querySelectorAll('#previewTableBody tr[data-date]').forEach(tr => {
+    const row = current.rows[Number(tr.dataset.idx)];
+    const hide = row && (row.status === 'same' || row.status === 'blank') && !current.showSame && !row.include;
+    tr.classList.toggle('hidden', Boolean(hide));
+  });
+}
+
+function renderSummary() {
+  const box = document.getElementById('previewSummary');
+  if (!box || !current) return;
+  const s = summarizeRows(current.rows);
+  const parts = [
+    s.new && `새로 ${s.new}`, s.change && `변경 ${s.change}`, s.manual && `✋ 수동 유지 ${s.manual}`,
+    s['blank-keep'] && `빈칸(기존 유지) ${s['blank-keep']}`, (s.same + s.blank) && `변경 없음 ${s.same + s.blank}`
+  ].filter(Boolean);
+  box.textContent = parts.join(' · ') || '반영할 내용이 없습니다.';
+  const same = document.getElementById('previewShowSameWrap');
+  const sameCount = s.same + s.blank;
+  if (same) {
+    same.classList.toggle('hidden', sameCount === 0);
+    const lbl = document.getElementById('previewShowSameText');
+    if (lbl) lbl.textContent = `변경 없는 날 ${sameCount}개도 보기`;
+  }
+}
+
+/**
+ * @param {{title:string, subtitle?:string, modelInfo?:string, warn?:string, rows:object[], onApply:(rows:{who,dateKey,value}[])=>void, onCancel?:()=>void}} opts
+ *  rows: { who, dateKey, value, raw?, prev?, status?, include?, note? } — planUploadRows 결과
+ */
+export function openRecognizePreview(opts) {
+  current = {
+    rows: opts.rows.map(r => ({ ...r, status: r.status || 'new', include: r.include !== false, edits: {} })),
+    onApply: opts.onApply, onCancel: opts.onCancel, showSame: false
+  };
+  document.getElementById('previewTitle').textContent = opts.title || '등록 미리보기';
+  document.getElementById('previewSubtitle').textContent = opts.subtitle || '';
+  document.getElementById('previewModelInfo').textContent = opts.modelInfo || '';
+  const warn = document.getElementById('previewWarn');
+  warn.textContent = opts.warn || '';
+  warn.classList.toggle('hidden', !opts.warn);
+  const showSame = document.getElementById('previewShowSame');
+  if (showSame) {
+    showSame.checked = false;
+    showSame.onchange = () => { current.showSame = showSame.checked; applyVisibility(); };
+  }
+
+  const body = document.getElementById('previewTableBody');
+  body.innerHTML = '';
+  current.rows.forEach((row, idx) => {
+    const tr = el('tr', `pv-row pv-row--${row.status}`);
+    tr.dataset.date = row.dateKey;
+    tr.dataset.who = row.who;
+    tr.dataset.idx = String(idx);
+    tr.dataset.status = row.status;
+    const td = el('td', 'pv-cell');
+    tr.appendChild(td);
+
+    // 1줄: [체크] 날짜 사람 상태
+    const head = el('div', 'pv-head');
+    const lab = el('label', 'pv-check');
+    const chk = document.createElement('input');
+    chk.type = 'checkbox';
+    chk.className = 'pv-include';
+    chk.checked = row.include;
+    chk.setAttribute('aria-label', `${row.dateKey} ${CHECK_MEANING[row.status] || '반영'}`);
+    const chkText = el('span', 'pv-check-text', CHECK_MEANING[row.status] || '반영');
+    lab.append(chk, chkText);
+    const [, m, d] = row.dateKey.split('-').map(Number);
+    const dow = weekdayOfKey(row.dateKey);
+    const date = el('span', `pv-date ${dow === 0 ? 'is-sun' : dow === 6 ? 'is-sat' : ''}`, `${m}/${d}(${DOW[dow]})`);
+    const who = el('span', `pv-who ${row.who === 'my' ? 'pv-who--k' : 'pv-who--y'}`, personName(row.who === 'my' ? 'my' : 'gf'));
+    const badge = el('span', STATUS_CLASS[row.status] || 'pv-badge', STATUS_LABEL[row.status] || '');
+    head.append(lab, date, who, badge);
+    td.appendChild(head);
+
+    // 2줄: 근무 · 도시 · 시간 (바로 고치기)
+    const edit = el('div', 'pv-edit');
+    let legsBlock = null;
+    const typeIn = input('pv-type pv-input', row.value.type, { list: row.who === 'my' ? 'previewMyTypes' : 'previewGfTypes', 'aria-label': '근무' });
+    const touch = () => { if (!row.include) { row.include = true; chk.checked = true; tr.classList.remove('is-off'); updateCount(); } };
+    typeIn.addEventListener('input', () => { row.edits.type = typeIn.value; touch(); });
+    edit.appendChild(typeIn);
+    if (row.who === 'gf' && ('destination' in row.value)) {
+      const destIn = input('pv-dest pv-input', row.value.destination, { placeholder: '도시', 'aria-label': '도시' });
+      destIn.addEventListener('input', () => { row.edits.destination = destIn.value; touch(); });
+      edit.appendChild(destIn);
+    }
+    if (row.who === 'gf' && isFlightDuty(row.value)) {
+      // v2.3.0: 사진에서 편명이 빠졌으면 여기서 직접 넣기 (예: TW405 또는 TW501 ICN-SYD)
+      // v2.3.1: '721/806' = 가는 편 TW721 + 오는 편 TW806 → 두 칸으로 나눠 보여 주고 고칠 수 있게
+      // v2.4.0: 사진에서 읽은 편명을 레그마다 한 칸씩 (최대 4칸, 3개 이상이면 3칸) + '전체 N레그 · TW721 · TW806' 요약
+      // v2.4.1: [+ 레그] 없음 — 칸 수는 (읽은 레그 수, 최소 2). 모자라게 읽었으면 첫 칸에 '241/242/243' 처럼 적으면 레그별로 나뉜다.
+      const legs = gfFlights(row.value);
+      const view = previewRowView(row);
+      const shown = view.inputs.length || previewLegSlots(legs.length);
+      const legsBox = el('div', 'pv-legs');
+      const ins = [];
+      const nameOf = (i, n) => (n <= 2 ? ['가는 편', '오는 편'][i] : `${i + 1}레그`);
+      const sum = el('div', 'pv-legsum');
+      const refreshSum = () => {
+        const s = legSummaryText(ins.map(x => x.value));
+        sum.textContent = s.text;
+        sum.classList.toggle('is-multi', s.count > 1);
+      };
+      const addIn = i => {
+        const n = ins.length + 1;
+        const cls = i === 0 ? 'pv-flight' : `pv-flight${i + 1}`;
+        const inp = input(`${cls} pv-input`, view.inputs[i] !== undefined ? view.inputs[i] : (legs[i] ? flightLabel(legs[i]) : (i === 0 ? (row.value.flight || '') : '')), { placeholder: nameOf(i, Math.max(n, shown)), autocapitalize: 'characters', 'aria-label': `편명 ${nameOf(i, Math.max(n, shown))}` });
+        const key = i === 0 ? 'flight' : `flight${i + 1}`;
+        inp.addEventListener('input', () => { row.edits[key] = inp.value; touch(); refreshSum(); });
+        ins.push(inp);
+        legsBox.appendChild(inp);
+      };
+      for (let i = 0; i < shown; i++) addIn(i);
+      refreshSum();
+      legsBlock = el('div', 'pv-legs-wrap');
+      legsBlock.append(legsBox, sum);
+    }
+    const sIn = input('pv-start pv-input pv-time', row.value.start, { placeholder: '--:--', inputmode: 'numeric', 'aria-label': '시작' });
+    const eIn = input('pv-end pv-input pv-time', row.value.end, { placeholder: '--:--', inputmode: 'numeric', 'aria-label': '끝' });
+    sIn.addEventListener('input', () => { row.edits.start = sIn.value; touch(); });
+    eIn.addEventListener('input', () => { row.edits.end = eIn.value; touch(); });
+    const timeWrap = el('span', 'pv-times');
+    timeWrap.append(sIn, el('span', 'pv-tilde', '~'), eIn);
+    edit.appendChild(timeWrap);
+    td.appendChild(edit);
+    if (legsBlock) td.appendChild(legsBlock);
+
+    // v2.4.4: L/O·TRAIN·전날 출발 비행 — 비행편 칸이 아니라 따로 (사진 한 칸에 블록이 여러 개인 날)
+    if (row.who === 'gf') {
+      const v4 = previewRowView(row);
+      if (v4.extras.length) {
+        const ex = el('div', 'pv-extras');
+        for (const l of v4.extras) ex.appendChild(el('div', `pv-extra pv-extra--${l.kind}`, l.text));
+        td.appendChild(ex);
+      }
+      if (v4.warnings.length) {
+        const w = el('div', 'pv-warns');
+        for (const t of v4.warnings) w.appendChild(el('div', 'pv-warn-line', `⚠️ ${t}`));
+        td.appendChild(w);
+      }
+    }
+
+    // 예진 체류 비행: 한국시각 미리 보기 (달력 칸·상세 카드와 같은 함수 stayKstInfo) — 미등록 도시는 '(KR ?)'
+    if (row.who === 'gf') {
+      const kst = el('div', 'pv-kst hidden');
+      const refreshKst = () => {
+        const v = { ...row.value, ...row.edits };
+        if (row.edits.type !== undefined && row.edits.type !== row.value.type) v.isQuickTurn = v.type === '퀵턴';
+        const k = stayKstInfo(v, row.dateKey);
+        const show = Boolean(k && k.status !== 'same');
+        kst.classList.toggle('hidden', !show);
+        kst.classList.toggle('is-unknown', Boolean(k && k.status === 'unknown'));
+        kst.textContent = !show ? '' : k.status === 'unknown'
+          ? `🕒 한국시각 ${k.text} — '${v.destination || '(도시 없음)'}' 시간대 미등록`
+          : `🕒 ${k.kind === 'departure' ? '출발' : '도착'} 한국시각 ${k.text}`;
+      };
+      for (const inp of [typeIn, sIn, eIn, edit.querySelector('.pv-dest')]) if (inp) inp.addEventListener('input', refreshKst);
+      refreshKst();
+      td.appendChild(kst);
+    }
+
+    // 3줄: 기존 값 → 새 값 / 안내
+    const diff = el('div', 'pv-diff');
+    if (row.status === 'change' || row.status === 'manual' || row.status === 'blank-keep' || row.status === 'same') {
+      diff.append(el('span', 'pv-prev-label', '기존 '), el('span', 'pv-prev', describeDuty(row.who, row.prev)));
+      if (row.prev && row.prev.manual) diff.append(el('span', 'pv-manual-tag', '✋ 직접 입력'));
+      if (row.status !== 'same') diff.append(el('span', 'pv-arrow', ' → '), el('span', 'pv-next', row.status === 'blank-keep' ? '(빈칸)' : describeDuty(row.who, row.value)));
+    }
+    if (row.status === 'manual') diff.append(el('div', 'pv-hint', '편집창으로 직접 넣은 값이라 그대로 둡니다. 근무표 값으로 바꾸려면 [덮어쓰기]를 체크하세요.'));
+    if (row.status === 'blank-keep') diff.append(el('div', 'pv-hint', '근무표의 빈칸은 기존 값을 지우지 않습니다. 지우려면 [지우기]를 체크하세요.'));
+    if (row.note) diff.append(el('div', 'pv-note', row.note));
+    if (diff.childNodes.length) td.appendChild(diff);
+
+    chk.addEventListener('change', () => { row.include = chk.checked; tr.classList.toggle('is-off', !chk.checked); updateCount(); });
+    if (!row.include) tr.classList.add('is-off');
+    body.appendChild(tr);
+  });
+  renderSummary();
+  applyVisibility();
+  updateCount();
+  document.getElementById('recognizePreviewModal').classList.remove('hidden');
+}
+
+export function closeRecognizePreview() {
+  document.getElementById('recognizePreviewModal').classList.add('hidden');
+}
+
+export function cancelRecognizePreview() {
+  const c = current;
+  current = null;
+  closeRecognizePreview();
+  if (c && c.onCancel) c.onCancel();
+}
+
+export async function applyRecognizePreview() {
+  if (!current) return;
+  const rows = current.rows.filter(r => r.include)
+    .map(r => ({ who: r.who, dateKey: r.dateKey, status: r.status, value: finalizePreviewRow(r, r.edits) }))
+    .filter(r => !(r.status === 'blank' && isBlankDuty(r.value))); // 빈칸 + 기존 값 없음 = 할 일 없음
+  if (!rows.length && !confirm('반영할 날짜가 없습니다. 이대로 닫을까요? (근무표는 바뀌지 않습니다)')) return;
+  const cb = current.onApply;
+  current = null;
+  closeRecognizePreview();
+  await cb(rows);
+}

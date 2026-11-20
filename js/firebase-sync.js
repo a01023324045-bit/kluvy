@@ -14,7 +14,7 @@
 // 오프라인(v2.5.0): 비행기모드·서버에 못 닿음이면 이 폰 저장분(localStorage·IndexedDB)을 그대로 보여 주고 아무것도 덮지 않는다.
 //         배지는 '오프라인'(툴팁 「오프라인 · 마지막 동기화 11/15 17:42」) — 토큰 문제인 '로그인 필요'와 구분.
 //         마지막 동기화 시각은 localStorage 'kluvy_last_sync_at' 에 저장해 다음 실행·오프라인에서도 보여 준다.
-import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, getConfiguredDbUrl } from './config.js';
+import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, getConfiguredDbUrl, modeKey } from './config.js';
 import { getFbAuthQuery, getIdTokenExpiry, invalidateIdToken, fbIsLoggedIn } from './auth.js';
 import { safeGetStorage, safeSetStorage } from './storage.js';
 import { state } from './state.js';
@@ -27,7 +27,7 @@ import { saveLastSyncAt, loadLastSyncAt, renderLastSyncText, renderFirstRunNotic
 
 export { getDbBaseUrl };
 
-export const SYNC_QUEUE_KEY = 'kluvySyncQueue_v2';
+export const SYNC_QUEUE_KEY = modeKey('kluvySyncQueue_v2'); // v2.6.0: 개인 모드는 kluvy_personal_SyncQueue_v2
 export const POLL_INTERVAL_MS = 30000;
 const WATCHDOG_MS = 75000;        // RTDB keep-alive 는 약 30초 간격 → 75초 동안 아무것도 없으면 끊긴 것으로 봄
 const FLUSH_RETRY_MS = 15000;

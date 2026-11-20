@@ -1,5 +1,7 @@
 // 앱 시작점
-import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, PREF_KEYS } from './config.js';
+import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, PREF_KEYS, IS_PERSONAL, modeKey } from './config.js';
+import { applyAppMode } from './app-mode.js';
+import { maybeShowOnboarding } from './ui/personal.js';
 import { safeGetStorage, safeSetStorage } from './storage.js';
 import { state } from './state.js';
 import { setOnAuthInvalidated } from './auth.js';
@@ -35,7 +37,8 @@ if ('serviceWorker' in navigator) {
 setOnAuthInvalidated(updateFbLoginUI);
 
 function loadLocalData() {
-  if (!localStorage.getItem(STORAGE_KEYS.dbUrl)) {
+  // 개인 모드(v2.6.0)는 기본 주소가 없다(DEFAULT_FIREBASE_URL = '') → 본인이 설정에서 넣기 전까지 '로컬 저장됨'
+  if (!localStorage.getItem(STORAGE_KEYS.dbUrl) && DEFAULT_FIREBASE_URL) {
     safeSetStorage(STORAGE_KEYS.dbUrl, DEFAULT_FIREBASE_URL);
   }
 
@@ -52,7 +55,8 @@ function loadLocalData() {
   // v2.5.2: 기념일 표시 설정 (기본 켜짐)
   state.showAnniversary = safeGetStorage(PREF_KEYS.showAnniversary, true) !== false;
 
-  state.customAnniversaries = safeGetStorage(STORAGE_KEYS.anniversaries, [
+  // 개인 모드: 기본 기념일 없음 (사용자가 추가한 것만)
+  state.customAnniversaries = safeGetStorage(STORAGE_KEYS.anniversaries, IS_PERSONAL ? [] : [
     { name: "규호 생일", date: "2026-05-18", isRepeat: true },
     { name: "예진 생일", date: "2026-09-12", isRepeat: true }
   ]);
@@ -61,8 +65,9 @@ function loadLocalData() {
 // 3단계 1회성 보정: 휴일의 '석근 13~21' → 공휴일석근 15~21, 시간 없는 '석5' → 석5/공휴일석5.
 // 서버 근무표를 받은 뒤에 돌린다(옛 사본을 고치지 않도록). 수동 입력 값은 제외. 바뀐 날짜만 칸 단위 PATCH(멱등).
 // 이 폰에서 한 번 끝나면 다시 돌지 않는다(MIGRATION_KEY). 다른 폰과 동시에 돌아도 같은 값을 쓰므로 안전.
-const MIGRATION_KEY = 'kluvy_migration_seok_v1';
+const MIGRATION_KEY = modeKey('kluvy_migration_seok_v1');
 function runSeokMigration() {
+  if (IS_PERSONAL) return; // 규호(my 칸) 교대근무 규칙 — 개인 모드는 my 칸을 쓰지 않음
   if (localStorage.getItem(MIGRATION_KEY)) return;
   const changed = migrateKyuhoSeokRules(state.scheduleDB);
   if (changed.length) {
@@ -83,11 +88,13 @@ function prefetchForOffline() {
 
 function initApp() {
   try {
+    applyAppMode(document); // v2.6.0: <html data-app-mode> + 개인 모드 문구 (커플 모드는 속성만)
     initYearSelector();
     updateFbLoginUI();
     renderCalendar();
     updateDetailCard();
     initApplyBar(); // v2.4.6: 10분 안의 '되돌리기' 기록이 있으면 반영 결과 바를 다시 보여 줌
+    maybeShowOnboarding(); // v2.6.0: 개인 모드 첫 실행 — 이름 입력
   } catch (err) {
     console.error("초기화 예외 발생:", err);
   }

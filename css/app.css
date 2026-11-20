@@ -337,3 +337,11 @@ button.cur-thumb:not(:disabled):active { opacity: .85; }
 .apply-bar__btn--reread:disabled { opacity: .6; }
 .apply-bar__btns { flex-wrap: wrap; justify-content: flex-end; }
 .apply-bar__details { max-height: 38vh; overflow-y: auto; }
+
+/* ===== v2.6.0 앱 모드 (js/app-mode.js) =====
+   커플 모드(기본): data-personal-only 요소는 항상 숨김 — 화면은 v2.5.3 과 같다.
+   개인 모드(<html data-app-mode="personal">, personal/ 사본): data-couple-only 요소(규호 칸·데이트·D-Day·사람 보기 토글)를 숨김. */
+html:not([data-app-mode="personal"]) [data-personal-only] { display: none !important; }
+html[data-app-mode="personal"] [data-couple-only] { display: none !important; }
+html[data-app-mode="personal"] .promise-grid { grid-template-columns: minmax(0, 1fr); }
+html[data-app-mode="personal"] .legend-who { width: auto; min-width: 44px; max-width: 40%; margin-right: 2px; overflow: hidden; text-overflow: ellipsis; }

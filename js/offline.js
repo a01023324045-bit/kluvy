@@ -7,9 +7,11 @@
 //    10분에 한 번까지만, 사진은 서버 값이 바뀐 달만(최대 2장). 실패는 조용히 무시.
 // 이 파일의 앞부분은 DOM 없이 테스트할 수 있는 순수 함수, 뒷부분은 화면 갱신.
 import { getKSTDate, makeMonthKey } from './dates.js';
+import { modeKey } from './config.js';
 
-export const LAST_SYNC_KEY = 'kluvy_last_sync_at';
-export const PREFETCH_KEY = 'kluvy_prefetch_v1';
+// v2.6.0: 개인 모드는 kluvy_personal_ 접두어 (modeKey)
+export const LAST_SYNC_KEY = modeKey('kluvy_last_sync_at');
+export const PREFETCH_KEY = modeKey('kluvy_prefetch_v1');
 export const PREFETCH_MIN_GAP_MS = 10 * 60 * 1000;
 export const FIRST_RUN_OFFLINE_TEXT = '인터넷에 연결한 뒤 한 번 열어야 근무표를 내려받습니다.';
 

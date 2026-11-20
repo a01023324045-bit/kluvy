@@ -9,6 +9,7 @@
 import { stayKstInfo, getKstDiffHours, kstDiffText, KST_UNKNOWN } from './timezone.js';
 import { gfFlights, legsSummary } from './flight.js';
 import { placeByIata } from './places.js';
+import { personName } from './app-mode.js';
 
 const HHMM = /^(\d{1,2}):(\d{2})$/;
 const pad2 = v => String(v).padStart(2, '0');
@@ -88,7 +89,7 @@ function getKstKnown(dest, dateKey) {
 export function cellTooltip(g, flightsShort) {
   if (!g || !g.type) return '';
   const ex = dutyExtrasLines(g).map(l => l.text.replace(/^\S+\s/, ''));
-  return `예진 ${g.destination ? g.destination + ' ' : ''}${g.type}${g.start ? ` ${g.start}~${g.end}` : ''}${flightsShort ? ` ${flightsShort}` : ''}${ex.length ? ` · ${ex.join(' · ')}` : ''}`;
+  return `${personName('gf')} ${g.destination ? g.destination + ' ' : ''}${g.type}${g.start ? ` ${g.start}~${g.end}` : ''}${flightsShort ? ` ${flightsShort}` : ''}${ex.length ? ` · ${ex.join(' · ')}` : ''}`;
 }
 
 // ───────── v2.4.4 L/O · TRAIN · 전날 출발 비행 (비행 상자 밖에 따로 보이는 부가 일정) ─────────

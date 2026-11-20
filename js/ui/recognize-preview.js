@@ -4,6 +4,7 @@
 //        근무표 빈칸은 '기존 값 유지'(체크하면 지우기), 내용이 같은 날은 '변경 없음'(기본 숨김). [반영]을 눌러야 저장된다.
 // 데이터는 모두 textContent / input.value 로만 넣는다 (innerHTML 에 사진에서 읽은 글자를 넣지 않음).
 import { weekdayOfKey } from '../dates.js';
+import { personName } from '../app-mode.js';
 import { stayKstInfo } from '../timezone.js';
 import { isFlightDuty } from './flight-card.js';
 import { gfFlights, flightLabel, flightFieldsFromInputs, MAX_LEGS } from '../flight.js';
@@ -193,7 +194,7 @@ export function openRecognizePreview(opts) {
     const [, m, d] = row.dateKey.split('-').map(Number);
     const dow = weekdayOfKey(row.dateKey);
     const date = el('span', `pv-date ${dow === 0 ? 'is-sun' : dow === 6 ? 'is-sat' : ''}`, `${m}/${d}(${DOW[dow]})`);
-    const who = el('span', `pv-who ${row.who === 'my' ? 'pv-who--k' : 'pv-who--y'}`, row.who === 'my' ? '규호' : '예진');
+    const who = el('span', `pv-who ${row.who === 'my' ? 'pv-who--k' : 'pv-who--y'}`, personName(row.who === 'my' ? 'my' : 'gf'));
     const badge = el('span', STATUS_CLASS[row.status] || 'pv-badge', STATUS_LABEL[row.status] || '');
     head.append(lab, date, who, badge);
     td.appendChild(head);

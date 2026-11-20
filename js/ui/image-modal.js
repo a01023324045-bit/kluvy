@@ -3,7 +3,7 @@
 //             서버 메타(kluvyMeta/images/{월}, 없으면 images/{월}/updatedAt)로 상대가 바꾼 사진을 감지해 새로 받음.
 import { state } from '../state.js';
 import { makeMonthKey } from '../dates.js';
-import { STORAGE_KEYS } from '../config.js';
+import { STORAGE_KEYS, IS_PERSONAL } from '../config.js';
 import { isSafeImageDataUrl } from '../escape.js';
 import { getDbBaseUrl, dbFetch, dbGetJson } from '../db-rest.js';
 import { getPhotoBackend, needsDownload, buildPhotoPatch, LEGACY_PHOTO_PREFIX } from '../photo-store.js';
@@ -110,7 +110,7 @@ export function openOriginalImageInNewTab() {
   const w = window.open("");
   if (!w) return;
   // document.write 로 src 를 문자열에 끼워 넣지 않고 DOM 으로 만든다 (XSS 방지)
-  w.document.title = '이예진 근무표 원본 고화질';
+  w.document.title = IS_PERSONAL ? '내 근무표 원본 고화질' : '이예진 근무표 원본 고화질';
   w.document.body.style.cssText = 'margin:0;background:#111;display:flex;justify-content:center;';
   const img = w.document.createElement('img');
   img.src = src;

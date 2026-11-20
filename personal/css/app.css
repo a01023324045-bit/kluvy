@@ -1,0 +1,347 @@
+/* KLUVY 디자인
+ * 색·글자 크기는 이 파일 맨 위 :root 변수에서만 바꾸면 된다. (Tailwind 는 배치·여백 위주)
+ * 원칙: 달력 칸 글자 최소 11px · 입력칸 16px(폰 확대 방지) · 누르는 곳 44px
+ * v2.3.0: 글꼴 Pretendard(앱에 내장) + 굵기 한 단계씩 낮춤(본문 500 · 강조 600 · 제목 700)
+ *         근무 형태 색 = 운영본(v1) 색 그대로 · 사람 구분 = 위치(규호 윗줄 / 예진 아랫줄), 사람별 왼쪽 막대 없음
+ */
+/* 글꼴: 프리텐다드 (SIL OFL 1.1, fonts/Pretendard-LICENSE.txt). 앱에 들어 있어 모든 폰·오프라인·캡처에서 같게 보임 */
+@font-face {
+  font-family: "Pretendard Variable";
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: swap;
+  src: url("../fonts/PretendardVariable.woff2") format("woff2-variations"), url("../fonts/PretendardVariable.woff2") format("woff2");
+}
+
+:root {
+  --kv-font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", Roboto, sans-serif;
+
+  /* 글자 크기 */
+  --kv-fs-cell: 11px;        /* 달력 칸 안 글자 (최소) */
+  --kv-fs-cell-day: 13px;    /* 달력 날짜 숫자 */
+  --kv-fs-small: 12px;       /* 보조 설명 */
+  --kv-fs-body: 14px;        /* 본문 */
+  --kv-fs-title: 16px;       /* 카드 제목 */
+  --kv-fs-input: 16px;       /* 입력칸 (16px 미만이면 iOS 가 확대) */
+  --kv-touch: 44px;          /* 최소 터치 높이 */
+  --kv-cell-h: 104px;        /* 달력 칸 높이 */
+  --kv-cell-h-tall: 118px;   /* 예진만 보기 (시간 + 한국시각 + 날짜 넘김 4줄) */
+
+  /* 글자 굵기 (Pretendard Variable 45~920) */
+  --kv-w-body: 500;
+  --kv-w-strong: 600;
+  --kv-w-title: 700;
+
+  /* 기본 색 */
+  --kv-bg: #f4f5f8;
+  --kv-card: #ffffff;
+  --kv-line: #e2e8f0;
+  --kv-text: #0f172a;
+  --kv-text-2: #475569;      /* 보조 글자 (흰 배경 대비 7.5:1) */
+  --kv-text-3: #64748b;      /* 흐린 글자 (4.8:1) */
+  --kv-brand: #e11d48;       /* 커플 앱 포인트 (절제해서 사용) */
+  --kv-brand-soft: #fff1f2;
+  --kv-today: #4338ca;
+  --kv-select: #4f46e5;
+  --kv-sun: #dc2626;
+  --kv-sat: #1d4ed8;
+
+  /* 사람 (필터 버튼·점·상세 카드) */
+  --kv-kyuho: #2563eb;
+  --kv-yejin: #e11d48;
+
+  /* 근무 형태: 배경 / 글자 / 테두리 — 운영본(v1, tools/legacy/index.html renderCalendar) 의 Tailwind 색 그대로 */
+  --d-kwork-bg: #eff6ff;  --d-kwork-fg: #1d4ed8;  --d-kwork-bd: #bfdbfe;  /* 규호 근무 전부 (조근·석근·석5·석1·일근·공휴일*·그 밖) = blue-50/700/200 */
+  --d-koff-bg: #ecfdf5;   --d-koff-fg: #047857;   --d-koff-bd: #a7f3d0;   /* 규호 O·대휴·연차·휴가 = emerald-50/700/200 */
+  --d-yoff-bg: #ecfdf5;   --d-yoff-fg: #059669;   --d-yoff-bd: #6ee7b7;   /* 예진 OFF = emerald-50/600/300 */
+  --d-quick-bg: #ecfeff;  --d-quick-fg: #0e7490;  --d-quick-bd: #67e8f9;  /* 예진 퀵턴 = cyan-50/700/300 */
+  --d-stay-bg: #fff1f2;   --d-stay-fg: #e11d48;   --d-stay-bd: #fda4af;   /* 예진 체류·L/O·비행 = rose-50/600/300 */
+  --d-sby-bg: #fefce8;    --d-sby-fg: #a16207;    --d-sby-bd: #fde047;    /* 예진 SBY·IS?·GS? 대기 = yellow-50/700/300 */
+  --d-tr-bg: #faf5ff;     --d-tr-fg: #9333ea;     --d-tr-bd: #d8b4fe;     /* 예진 TR = purple-50/600/300 */
+  --d-other-bg: #f1f5f9;  --d-other-fg: #475569;  --d-other-bd: #e2e8f0;  /* 예진 그 밖 = slate-100/600/200 */
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  font-family: var(--kv-font);
+  font-weight: var(--kv-w-body);
+  letter-spacing: -0.01em;
+  background: var(--kv-bg);
+  color: var(--kv-text);
+  font-size: var(--kv-fs-body);
+}
+button, input, select, textarea { font-family: inherit; letter-spacing: inherit; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+
+/* 입력칸은 16px (폰 확대 방지) */
+input[type="text"], input[type="email"], input[type="password"], input[type="time"], input[type="date"], select, textarea {
+  font-size: var(--kv-fs-input);
+}
+.touch { min-height: var(--kv-touch); }
+
+/* ---------------- 달력 ---------------- */
+.calendar-cell {
+  height: var(--kv-cell-h);
+  min-height: var(--kv-cell-h);
+  max-height: var(--kv-cell-h);
+  box-sizing: border-box;
+  min-width: 0;
+}
+.cal-grid--tall .calendar-cell { height: var(--kv-cell-h-tall); min-height: var(--kv-cell-h-tall); max-height: var(--kv-cell-h-tall); }
+.cal-cell { position: relative; padding: 3px 2px 2px; display: flex; flex-direction: column; gap: 2px; cursor: pointer; overflow: hidden; border-right: 1px solid var(--kv-line); border-bottom: 1px solid var(--kv-line); background: #fff; }
+.cal-cell:nth-child(7n) { border-right: 0; }
+.cal-cell.is-empty { background: #fafbfc; cursor: default; }
+.cal-cell.is-selected { box-shadow: inset 0 0 0 2px var(--kv-select); border-radius: 6px; z-index: 1; }
+/* v2.3.1: 달력 위 연·월 — 캡처 이미지에서 '2026.' / '11' 두 줄로 쪼개지던 문제 (복제본에 고정 폭이 박힌 채 글자가 조금 넓게 그려지면 공백에서 줄바꿈) */
+.cal-month-title { white-space: nowrap; flex-shrink: 0; min-width: max-content; text-align: center; }
+.cal-top { display: flex; align-items: center; justify-content: space-between; height: 20px; flex-shrink: 0; }
+.cal-day { font-size: var(--kv-fs-cell-day); font-weight: var(--kv-w-title); line-height: 20px; min-width: 20px; height: 20px; text-align: center; color: var(--kv-text); font-variant-numeric: tabular-nums; }
+.cal-day.is-sun { color: var(--kv-sun); }
+.cal-day.is-sat { color: var(--kv-sat); }
+.cal-day.is-today { background: var(--kv-today); color: #fff; border-radius: 999px; }
+.cal-icons { display: flex; align-items: center; gap: 0; font-size: var(--kv-fs-cell); line-height: 1; }
+.cal-icons i { font-size: 10px; }
+.cal-icons .dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
+.cal-icons .dot--k { background: var(--kv-kyuho); }
+.cal-icons .dot--y { background: var(--kv-yejin); }
+.cal-sub { font-size: var(--kv-fs-cell); line-height: 13px; height: 13px; font-weight: var(--kv-w-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; letter-spacing: -0.03em; flex-shrink: 0; }
+.cal-sub--holiday { color: var(--kv-sun); }
+.cal-sub--aniv { color: #92400e; background: #fef3c7; border-radius: 4px; }
+.cal-duties { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+/* 근무 칸 (위: 규호 / 아래: 예진 — 운영본과 같은 위치 구분) */
+.duty {
+  display: block; height: 21px; line-height: 19px; font-size: var(--kv-fs-cell); font-weight: var(--kv-w-strong);
+  border: 1px solid transparent; border-radius: 5px; padding: 0 2px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.02em; min-width: 0;
+}
+.duty--long { letter-spacing: -0.08em; padding: 0 1px; }
+/* 규호: 쉬는 날만 초록, 나머지 근무는 모두 파랑 (운영본) */
+.duty--k { background: var(--d-kwork-bg); color: var(--d-kwork-fg); border-color: var(--d-kwork-bd); }
+.duty--k.duty--off { background: var(--d-koff-bg); color: var(--d-koff-fg); border-color: var(--d-koff-bd); }
+/* 예진: 근무 형태별 (운영본) */
+.duty--y.duty--off { background: var(--d-yoff-bg); color: var(--d-yoff-fg); border-color: var(--d-yoff-bd); }
+.duty--quick { background: var(--d-quick-bg); color: var(--d-quick-fg); border-color: var(--d-quick-bd); }
+.duty--stay { background: var(--d-stay-bg); color: var(--d-stay-fg); border-color: var(--d-stay-bd); }
+.duty--standby { background: var(--d-sby-bg); color: var(--d-sby-fg); border-color: var(--d-sby-bd); }
+.duty--tr { background: var(--d-tr-bg); color: var(--d-tr-fg); border-color: var(--d-tr-bd); }
+.duty--y.duty--other { background: var(--d-other-bg); color: var(--d-other-fg); border-color: var(--d-other-bd); }
+.duty--none { color: #94a3b8; font-weight: var(--kv-w-body); }
+.duty-time { font-size: var(--kv-fs-cell); line-height: 13px; color: var(--kv-text-2); text-align: center; font-variant-numeric: tabular-nums; font-weight: var(--kv-w-body); white-space: nowrap; overflow: hidden; letter-spacing: -0.04em; }
+.duty-time b { color: var(--kv-text); font-weight: var(--kv-w-title); }
+.duty-time .kst { color: var(--d-stay-fg); font-weight: var(--kv-w-strong); }
+.duty-time .kst--unknown { color: #b45309; }
+.duty-lo { font-size: var(--kv-fs-cell); font-weight: var(--kv-w-strong); color: var(--d-stay-fg); text-align: center; letter-spacing: 0.05em; }
+
+/* 범례 */
+.legend-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.legend-who { font-size: var(--kv-fs-small); font-weight: var(--kv-w-title); width: 44px; flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.legend-row .duty { display: inline-block; height: 22px; line-height: 20px; padding: 0 7px; }
+
+/* 상세 카드 */
+#selectedDateTitle { scroll-margin-top: 120px; }
+.nowrap { white-space: nowrap; }
+.detail-person { border-left: 4px solid var(--kv-line); padding-left: 10px; }
+.detail-person--k { border-left-color: var(--kv-kyuho); }
+.detail-person--y { border-left-color: var(--kv-yejin); }
+.detail-shift { font-size: 15px; font-weight: var(--kv-w-title); color: var(--kv-text); line-height: 1.35; word-break: keep-all; }
+.detail-shift-sub { font-size: 13px; color: var(--kv-text-2); line-height: 1.4; word-break: keep-all; }
+.kst-diff { display: block; margin-top: 2px; font-size: 13px; font-weight: var(--kv-w-body); color: var(--kv-text-2); }
+.timeline-track { position: relative; width: 100%; height: 26px; background: #f1f5f9; border-radius: 8px; overflow: hidden; border: 1px solid var(--kv-line); }
+.timeline-bar { position: absolute; top: 0; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: var(--kv-w-strong); color: #fff; border-radius: 6px; white-space: nowrap; overflow: hidden; transition: all .2s; }
+.manual-tag { display: inline-flex; align-items: center; font-size: 11px; font-weight: var(--kv-w-strong); color: #5b21b6; background: #ede9fe; border: 1px solid #c4b5fd; border-radius: 999px; padding: 1px 7px; margin-left: 4px; vertical-align: middle; }
+
+/* v2.4.0 상세 카드 제목 압축: 큰 글씨 1줄 + 작은 글씨 1줄 (괄호·대괄호 없음, 말줄임 없음) */
+#detailGfShiftText.detail-shift--title { flex: 1 1 100%; text-align: left; }
+.dt-main { font-size: 16px; font-weight: var(--kv-w-title); line-height: 1.35; white-space: nowrap; }
+.dt-sub { font-size: 12.5px; font-weight: var(--kv-w-strong); color: var(--kv-text-2); line-height: 1.4; margin-top: 1px; }
+.dt-tags { margin-top: 3px; line-height: 1.6; }
+.dt-tags .manual-tag { margin-left: 0; margin-right: 4px; }
+/* v2.4.4: L/O · TRAIN · 전날 출발 비행 — 비행 상자 밖 별도 줄 (display 는 지정하지 않음: .hidden 과 충돌 방지) */
+.dt-extras { margin-top: 2px; }
+.dt-extra { font-size: 13px; font-weight: var(--kv-w-strong); color: var(--kv-text-2); line-height: 1.5; word-break: keep-all; }
+.dt-extra--lo { color: var(--d-stay-fg); }
+.dt-extra--train { color: var(--d-tr-fg); }
+.duty-extra { font-size: var(--kv-fs-cell); line-height: 13px; font-weight: var(--kv-w-strong); color: var(--d-stay-fg); text-align: center; white-space: nowrap; overflow: hidden; letter-spacing: 0.02em; }
+.duty-arr { color: var(--d-stay-fg); }
+.pv-extras { margin-top: 4px; font-size: 13px; line-height: 1.45; color: var(--kv-text-2); font-weight: var(--kv-w-strong); }
+.pv-extra--lo { color: var(--d-stay-fg); }
+.pv-extra--train { color: var(--d-tr-fg); }
+.pv-warns { margin-top: 4px; font-size: 12.5px; line-height: 1.45; color: #b45309; }
+
+/* 비행 정보 상자 */
+.flight-box, #selectedDateTitle, #detailMyShiftText, #detailGfShiftText { word-break: keep-all; overflow-wrap: anywhere; } /* 한글 낱말 중간 줄바꿈 방지 (360px) */
+.flight-box { border: 1px solid #bae6fd; background: #f0f9ff; border-radius: 12px; padding: 10px; font-size: 13px; color: var(--kv-text); }
+.flight-box .fl-title { font-size: 14px; font-weight: var(--kv-w-title); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.flight-box .fl-row { display: grid; grid-template-columns: 34px 1fr; gap: 4px; line-height: 1.45; }
+.flight-box .fl-k { color: var(--kv-text-2); font-weight: var(--kv-w-strong); }
+.flight-box .fl-src { font-size: 12px; color: var(--kv-text-3); }
+.flight-box .fl-live { margin-top: 6px; padding: 6px 8px; background: #fff; border: 1px solid #bae6fd; border-radius: 8px; font-size: 13px; }
+.flight-box .fl-links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.flight-box .fl-link, .flight-box .fl-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 40px; padding: 0 12px; border-radius: 10px; font-size: 13px; font-weight: var(--kv-w-strong); border: 1px solid #7dd3fc; background: #fff; color: #075985; text-decoration: none; }
+.flight-box .fl-btn { background: #0369a1; border-color: #0369a1; color: #fff; }
+.flight-box .fl-btn[disabled] { opacity: .6; }
+.flight-box .fl-msg { font-size: 12px; color: var(--kv-text-2); margin-top: 4px; }
+.flight-box .fl-msg--err { color: #be123c; font-weight: var(--kv-w-strong); }
+/* v2.3.1 왕복(한 상자에 편마다 한 줄)·AirLabs 정기/예상/실제 라벨 */
+.flight-box .fl-leg-row { padding: 4px 0; border-top: 1px dashed #bae6fd; }
+.flight-box .fl-title + .fl-leg-row { border-top: 0; }
+.flight-box .fl-leg-line { line-height: 1.5; word-break: keep-all; }
+.flight-box .fl-leg-no { font-weight: var(--kv-w-title); }
+.flight-box .fl-leg-tag { font-size: 12px; }
+.flight-box .fl-live--compact { margin-top: 2px; padding: 4px 8px; font-size: 12px; }
+.flight-box .fl-time { font-weight: var(--kv-w-title); }
+.flight-box .fl-time--est, .flight-box .fl-time--act { color: #b45309; }
+.flight-box .fl-time--sched { color: var(--kv-text-2); }
+.flight-box .fl-src--manual { color: #047857; font-weight: var(--kv-w-strong); }
+.flight-box .fl-src--estimated, .flight-box .fl-src--actual { color: #b45309; font-weight: var(--kv-w-strong); }
+.flight-box .fl-al-sum { font-weight: var(--kv-w-strong); margin: 2px 0; }
+.flight-box .fl-al-line { line-height: 1.45; }
+.flight-box .fl-al-strong { color: #b45309; font-weight: var(--kv-w-title); }
+.flight-box .fl-al--scheduled { color: var(--kv-text-2); }
+.flight-box .fl-warn { color: #b45309; font-weight: var(--kv-w-strong); margin-top: 2px; }
+.flight-box .fl-manual { color: #047857; border-color: #6ee7b7; }
+
+/* 미리보기 (등록 확인) */
+.pv-row.is-off .pv-edit, .pv-row.is-off .pv-date, .pv-row.is-off .pv-who { opacity: .55; }
+.pv-cell { padding: 10px 10px; border-top: 1px solid var(--kv-line); }
+.pv-row:first-child .pv-cell { border-top: 0; }
+.pv-row--manual .pv-cell { background: #faf5ff; }
+.pv-row--change .pv-cell { background: #fffbeb; }
+.pv-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pv-check { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 8px 0 4px; border: 1px solid var(--kv-line); border-radius: 8px; background: #fff; font-size: 12px; font-weight: var(--kv-w-strong); color: var(--kv-text-2); cursor: pointer; }
+.pv-check input { width: 20px; height: 20px; accent-color: var(--kv-select); }
+.pv-date { font-size: 14px; font-weight: var(--kv-w-title); color: var(--kv-text); }
+.pv-date.is-sun { color: var(--kv-sun); }
+.pv-date.is-sat { color: var(--kv-sat); }
+.pv-who { font-size: 11px; font-weight: var(--kv-w-strong); padding: 2px 6px; border-radius: 6px; }
+.pv-who--k { background: #dbeafe; color: #1e3a8a; }
+.pv-who--y { background: #ffe4e6; color: #9f1239; }
+.pv-badge { font-size: 11px; font-weight: var(--kv-w-strong); padding: 2px 7px; border-radius: 999px; border: 1px solid; margin-left: auto; white-space: nowrap; }
+.pv-badge--new { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+.pv-badge--change { background: #fef3c7; color: #78350f; border-color: #fcd34d; }
+.pv-badge--same { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+.pv-badge--manual { background: #ede9fe; color: #4c1d95; border-color: #c4b5fd; }
+.pv-badge--blank { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
+.pv-edit { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.pv-input { font-size: var(--kv-fs-input); height: 40px; padding: 0 8px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: var(--kv-text); min-width: 0; }
+.pv-type { width: 7.2rem; font-weight: var(--kv-w-strong); }
+.pv-dest { width: 6rem; }
+.pv-flight, .pv-flight2, .pv-flight3, .pv-flight4 { flex: 1 1 8.6rem; width: 8.6rem; text-transform: uppercase; letter-spacing: -0.02em; } /* v2.3.1: 'TW721 GMP-CJU' 가 잘리지 않게 */
+.pv-times { display: inline-flex; align-items: center; gap: 2px; }
+.pv-time { width: 4.4rem; font-variant-numeric: tabular-nums; text-align: center; padding: 0 4px; }
+.pv-tilde { color: var(--kv-text-3); }
+.pv-diff { margin-top: 6px; font-size: 13px; color: var(--kv-text-2); line-height: 1.45; }
+.pv-prev { text-decoration: line-through; text-decoration-color: #94a3b8; }
+.pv-row--manual .pv-prev, .pv-row--blank-keep .pv-prev, .pv-row--same .pv-prev { text-decoration: none; color: var(--kv-text); font-weight: var(--kv-w-strong); }
+.pv-next { color: var(--kv-text); font-weight: var(--kv-w-strong); }
+.pv-manual-tag { margin-left: 4px; font-size: 11px; font-weight: var(--kv-w-strong); color: #5b21b6; }
+.pv-hint { font-size: 12px; color: #5b21b6; margin-top: 2px; }
+.pv-row--blank-keep .pv-hint { color: var(--kv-text-2); }
+.pv-note { font-size: 12px; color: #075985; margin-top: 2px; }
+.pv-kst { font-size: 12px; color: var(--d-stay-fg); margin-top: 6px; font-weight: var(--kv-w-strong); }
+.pv-kst.is-unknown { color: #b45309; }
+
+/* 모달 공통 */
+.modal-sheet { background: #fff; width: 100%; max-width: 28rem; box-shadow: 0 20px 50px rgba(15, 23, 42, .25); }
+.modal-head { position: sticky; top: 0; z-index: 2; background: #fff; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 16px 10px; border-bottom: 1px solid var(--kv-line); }
+.modal-close { width: var(--kv-touch); height: var(--kv-touch); display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; color: var(--kv-text-2); font-size: 20px; flex-shrink: 0; }
+.modal-close:active { background: #f1f5f9; }
+.field-label { display: block; font-size: 13px; font-weight: var(--kv-w-strong); color: var(--kv-text-2); margin-bottom: 4px; }
+.field { width: 100%; height: 44px; padding: 0 10px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; color: var(--kv-text); font-size: var(--kv-fs-input); }
+.field:focus { outline: 2px solid #a5b4fc; outline-offset: 0; border-color: var(--kv-select); }
+textarea.field { height: auto; padding: 8px 10px; line-height: 1.45; }
+.section { border: 1px solid var(--kv-line); border-radius: 16px; padding: 14px; background: #fff; }
+.section.is-hint { outline: 3px solid #fda4af; outline-offset: 2px; transition: outline-color .3s; }
+.section-title { font-size: 15px; font-weight: var(--kv-w-title); display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.help { font-size: 12px; color: var(--kv-text-3); line-height: 1.5; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: var(--kv-touch); padding: 0 14px; border-radius: 12px; font-weight: var(--kv-w-strong); font-size: 15px; }
+.btn-primary { background: #0f172a; color: #fff; }
+.btn-primary:active { background: #1e293b; }
+.btn-brand { background: var(--kv-select); color: #fff; }
+.btn-ghost { background: #f1f5f9; color: #334155; }
+.btn-line { background: #fff; color: #334155; border: 1px solid #cbd5e1; }
+
+/* 헤더 아이콘 버튼 (아이콘 + 글자, 44px) */
+.hbtn { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-width: 44px; height: 46px; padding: 0 6px; border-radius: 12px; font-size: 11px; font-weight: var(--kv-w-strong); color: #334155; background: #f8fafc; border: 1px solid var(--kv-line); white-space: nowrap; }
+.hbtn i { font-size: 15px; }
+.hbtn:active { background: #eef2ff; }
+.hbtn--primary { background: var(--kv-select); border-color: var(--kv-select); color: #fff; }
+.filter-btn { min-height: var(--kv-touch); padding: 0 14px; border-radius: 999px; font-weight: var(--kv-w-strong); font-size: 14px; display: inline-flex; align-items: center; gap: 6px; border: 1.5px solid; }
+.filter-btn[aria-pressed="true"].filter-btn--k { background: var(--kv-kyuho); border-color: var(--kv-kyuho); color: #fff; }
+.filter-btn[aria-pressed="true"].filter-btn--y { background: var(--kv-yejin); border-color: var(--kv-yejin); color: #fff; }
+.filter-btn[aria-pressed="false"] { background: #fff; border-color: #cbd5e1; color: #64748b; }
+/* v2.5.2: 세 번째 스위치(기념일) — 호박색. 한 줄에 셋이 들어가도록 좁은 폰(≤420px)에서는 안쪽 여백·글자를 조금 줄인다 */
+.filter-group { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: nowrap; }
+.filter-btn { white-space: nowrap; flex-shrink: 0; }
+.filter-btn[aria-pressed="true"].filter-btn--a { background: #d97706; border-color: #d97706; color: #fff; }
+@media (max-width: 420px) {
+  .filter-group { gap: 4px; }
+  .filter-btn { padding: 0 9px; gap: 4px; font-size: 13px; }
+}
+
+/* v2.5.2: 등록 창 '현재 파일' — 썸네일(또는 파일 아이콘) + 사람·달 라벨(주) + 파일 이름(보조, 길면 말줄임) */
+.cur-file { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 8px; background: #f8fafc; border: 1px solid var(--kv-line); border-radius: 12px; }
+.cur-thumb { flex: none; width: 72px; height: 72px; padding: 0; border-radius: 10px; overflow: hidden; background: #e2e8f0; border: 1px solid #cbd5e1; color: #94a3b8; font-size: 26px; display: inline-flex; align-items: center; justify-content: center; }
+.cur-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
+.cur-thumb img.hidden, .cur-thumb i.hidden, .cur-view.hidden { display: none; } /* Font Awesome 의 .fa-solid{display:inline-block} 이 Tailwind .hidden 보다 뒤라서 직접 지정 */
+button.cur-thumb:not(:disabled) { cursor: pointer; border-color: #fda4af; }
+button.cur-thumb:not(:disabled):active { opacity: .85; }
+.cur-file[data-who="kyuho"] .cur-thumb, #kyuhoCurrentFile .cur-thumb { color: #2563eb; }
+.cur-text { min-width: 0; flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+.cur-label { font-size: 13px; font-weight: var(--kv-w-title); color: #1e293b; line-height: 1.35; max-width: 100%; overflow-wrap: anywhere; }
+.cur-file[data-state="empty"] .cur-label { color: #64748b; font-weight: var(--kv-w-strong); }
+.cur-sub { font-size: 11px; color: #64748b; line-height: 1.4; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cur-sub:empty { display: none; }
+.cur-view { font-size: 13px; color: #be123c; font-weight: var(--kv-w-strong); text-decoration: underline; min-height: 36px; padding: 0; }
+
+
+/* 캡처 대체 경로(html2canvas) 전용 보정 — onclone 에서 <html class="cap-h2c"> 일 때만.
+   html2canvas 는 고정 높이 칸의 글자 기준선을 아래로 밀고 inset 그림자를 두껍게 그리므로 flex 가운데 정렬·자간 0·외곽선으로 바꾼다. */
+.cap-h2c .duty { display: flex; align-items: center; justify-content: center; line-height: normal; letter-spacing: 0; text-overflow: clip; }
+.cap-h2c .cal-day, .cap-h2c .cal-sub, .cap-h2c .duty-time { letter-spacing: 0; text-overflow: clip; }
+.cap-h2c .cal-cell.is-selected { box-shadow: none; outline: 2px solid var(--kv-select); outline-offset: -2px; }
+
+/* v2.4.0 레그 선택 칩 (1 TW721 · 2 TW806 · 3 … · 4 …) */
+.flight-box .fl-legs { display: grid; grid-template-columns: repeat(var(--legs, 2), minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+.flight-box .fl-leg-chip { min-height: 44px; padding: 0 4px; border-radius: 10px; border: 1px solid #7dd3fc; background: #fff; color: #075985; font-size: 12.5px; font-weight: var(--kv-w-strong); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.flight-box .fl-leg-chip.is-on { background: #0369a1; border-color: #0369a1; color: #fff; }
+
+/* v2.4.0 편집창 레그 칸 */
+.leg-block { border: 1px solid var(--kv-line); border-radius: 10px; padding: 8px; background: #f8fafc; }
+.leg-block .leg-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: var(--kv-w-strong); color: var(--kv-text-2); margin-bottom: 4px; }
+
+/* v2.4.0 미리보기 레그별 편명 칸 (최대 4) */
+.pv-legs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.pv-legsum { font-size: 12px; font-weight: var(--kv-w-strong); color: var(--kv-text-3); margin-top: 4px; }
+.pv-legsum.is-multi { color: #075985; }
+
+/* v2.4.6 반영 결과 바 (바로 반영 → 한 줄 요약 + 되돌리기) — 모달(z-50)·미리보기(z-60) 위 */
+.apply-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 70; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); pointer-events: none; }
+.apply-bar__inner { pointer-events: auto; max-width: 28rem; margin: 0 auto; border-radius: 16px; padding: 10px 10px 10px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; box-shadow: 0 6px 24px rgba(15,23,42,.28); border: 1px solid; }
+.apply-bar.is-ok .apply-bar__inner { background: #ecfdf5; border-color: #6ee7b7; color: #064e3b; }
+.apply-bar.is-warn .apply-bar__inner { background: #fffbeb; border-color: #fcd34d; color: #78350f; }
+.apply-bar.is-info .apply-bar__inner { background: #eef2ff; border-color: #a5b4fc; color: #312e81; }
+.apply-bar__text { flex: 1 1 12rem; min-width: 0; font-size: 14px; line-height: 1.45; font-weight: var(--kv-w-strong); word-break: keep-all; overflow-wrap: anywhere; }
+.apply-bar__btns { display: flex; align-items: center; gap: 4px; flex-shrink: 0; margin-left: auto; }
+.apply-bar__btn { min-height: 44px; padding: 0 12px; border-radius: 12px; font-size: 14px; font-weight: var(--kv-w-strong); text-decoration: underline; color: inherit; }
+.apply-bar__btn--undo { background: #fff; text-decoration: none; border: 1px solid currentColor; display: inline-flex; align-items: center; gap: 5px; }
+.apply-bar__btn--undo.hidden { display: none; }
+.apply-bar__close { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; font-size: 18px; color: inherit; }
+.apply-bar__details { flex-basis: 100%; font-size: 13px; line-height: 1.5; padding: 6px 4px 2px 18px; list-style: disc; font-weight: var(--kv-w-body); }
+.preview-first-link { font-size: 13px; color: #4338ca; font-weight: var(--kv-w-strong); text-decoration: underline; min-height: 36px; padding: 0 4px; }
+.preview-first-link:active { color: #312e81; }
+/* v2.5.1: [편명 다시 읽기] — 반영 요약 바 버튼 (편명 없는 비행일이 있을 때만 보임) */
+.apply-bar__btn--reread { background: #fff; text-decoration: none; border: 1px solid currentColor; }
+.apply-bar__btn--reread.hidden { display: none; }
+.apply-bar__btn--reread:disabled { opacity: .6; }
+.apply-bar__btns { flex-wrap: wrap; justify-content: flex-end; }
+.apply-bar__details { max-height: 38vh; overflow-y: auto; }
+
+/* ===== v2.6.0 앱 모드 (js/app-mode.js) =====
+   커플 모드(기본): data-personal-only 요소는 항상 숨김 — 화면은 v2.5.3 과 같다.
+   개인 모드(<html data-app-mode="personal">, personal/ 사본): data-couple-only 요소(규호 칸·데이트·D-Day·사람 보기 토글)를 숨김. */
+html:not([data-app-mode="personal"]) [data-personal-only] { display: none !important; }
+html[data-app-mode="personal"] [data-couple-only] { display: none !important; }
+html[data-app-mode="personal"] .promise-grid { grid-template-columns: minmax(0, 1fr); }
+html[data-app-mode="personal"] .legend-who { width: auto; min-width: 44px; max-width: 40%; margin-right: 2px; overflow: hidden; text-overflow: ellipsis; }

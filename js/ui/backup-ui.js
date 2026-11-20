@@ -1,5 +1,6 @@
 // 설정 영역(업로드 모달)의 '데이터 백업 다운로드 / 백업에서 복원'
 import { state } from '../state.js';
+import { IS_PERSONAL } from '../config.js';
 import { buildBackup, backupFileName, parseBackup } from '../backup.js';
 import { overwriteServerWithLocal } from '../firebase-sync.js';
 import { renderCalendar } from '../render/calendar.js';
@@ -48,7 +49,9 @@ export async function onBackupFileSelected() {
   const ok = confirm(
     `백업에서 복원할까요?\n\n` +
     `· 백업 시각: ${when}\n· 근무표 ${days}일, 기념일 ${anniversaries}개\n\n` +
-    `⚠️ 지금 이 폰과 서버(상대방 폰 포함)의 근무표·기념일이 모두 이 백업 내용으로 바뀝니다.\n` +
+    (IS_PERSONAL
+      ? `⚠️ 지금 이 기기와 서버(내 다른 기기 포함)의 근무표·기념일이 모두 이 백업 내용으로 바뀝니다.\n`
+      : `⚠️ 지금 이 폰과 서버(상대방 폰 포함)의 근무표·기념일이 모두 이 백업 내용으로 바뀝니다.\n`) +
     `필요하면 먼저 '백업 다운로드'로 현재 상태를 저장해 두세요.`
   );
   input.value = '';

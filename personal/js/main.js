@@ -1,0 +1,116 @@
+// 앱 시작점
+import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, PREF_KEYS, IS_PERSONAL, modeKey } from './config.js';
+import { applyAppMode } from './app-mode.js';
+import { maybeShowOnboarding } from './ui/personal.js';
+import { safeGetStorage, safeSetStorage } from './storage.js';
+import { state } from './state.js';
+import { setOnAuthInvalidated } from './auth.js';
+import { initSync, initSyncGuard, runAfterFirstFullSync, saveDB } from './firebase-sync.js';
+import { migrateKyuhoSeokRules } from './schedule-model.js';
+import { refreshFlightTimes } from './flight-times.js';
+import { getConfiguredDbUrl } from './config.js';
+import { renderCalendar, updateDetailCard } from './render/calendar.js';
+import { initYearSelector } from './ui/upload-modal.js';
+import { initApplyBar } from './ui/apply-bar.js';
+import { updateFbLoginUI } from './ui/login.js';
+import { handlers } from './handlers.js';
+import { getPhotoBackend, migrateLocalStoragePhotos } from './photo-store.js';
+import { isSafeImageDataUrl } from './escape.js';
+import { runPrefetch } from './offline.js';
+import { removeLegacySeedHistory } from './file-history.js';
+import { syncPhotoForMonth } from './ui/image-modal.js';
+
+// inline onclick 등에서 쓸 수 있도록 전역 노출
+Object.assign(window, handlers);
+
+// 새 버전이 활성화되면(서비스워커 교체) 한 번 자동 새로고침 — 탭이 옛 JS로 계속 도는 것을 막는다.
+if ('serviceWorker' in navigator) {
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloadedForUpdate = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloadedForUpdate) return;
+    reloadedForUpdate = true;
+    location.reload();
+  });
+}
+
+setOnAuthInvalidated(updateFbLoginUI);
+
+function loadLocalData() {
+  // 개인 모드(v2.6.0)는 기본 주소가 없다(DEFAULT_FIREBASE_URL = '') → 본인이 설정에서 넣기 전까지 '로컬 저장됨'
+  if (!localStorage.getItem(STORAGE_KEYS.dbUrl) && DEFAULT_FIREBASE_URL) {
+    safeSetStorage(STORAGE_KEYS.dbUrl, DEFAULT_FIREBASE_URL);
+  }
+
+  // 운영본은 여기서 내장 데이터(MASTER_SCHEDULE_DB, 2026-07~10)를 매번 다시 섞고 7/1·7/2 를 '휴가'로 고정했다.
+  // → 삭제. 내장 데이터는 tools/seed-2026-07-10.json 에 보관만 한다. 근무표는 이 폰 저장분 + 서버에서만 온다.
+  const scheduleDB = safeGetStorage(STORAGE_KEYS.schedule, {});
+  state.scheduleDB = (scheduleDB && typeof scheduleDB === 'object' && !Array.isArray(scheduleDB)) ? scheduleDB : {};
+  // 이 폰에 근무표가 없던 상태(새 폰·캐시 삭제)라면 서버에서 한 번 받기 전에는 아무것도 업로드하지 않는다.
+  initSyncGuard(Object.keys(state.scheduleDB).length > 0);
+
+  // v2.5.2: 예전에는 여기에 가짜 파일 이름(2610.png 등)을 기본값으로 넣었다 → 업로드한 적 없는 달에도 '현재 파일'로 보였다.
+  //   이제 기본값은 비어 있고, 이미 저장돼 있는 그 가짜 이름은 정리한다(sanitizeFileHistory). 사진·근무 데이터에 맞춰 보여 주는 쪽은 등록 창이 정한다.
+  state.fileHistory = removeLegacySeedHistory(safeGetStorage(STORAGE_KEYS.fileHistory, {}));
+  // v2.5.2: 기념일 표시 설정 (기본 켜짐)
+  state.showAnniversary = safeGetStorage(PREF_KEYS.showAnniversary, true) !== false;
+
+  // 개인 모드: 기본 기념일 없음 (사용자가 추가한 것만)
+  state.customAnniversaries = safeGetStorage(STORAGE_KEYS.anniversaries, IS_PERSONAL ? [] : [
+    { name: "규호 생일", date: "2026-05-18", isRepeat: true },
+    { name: "예진 생일", date: "2026-09-12", isRepeat: true }
+  ]);
+}
+
+// 3단계 1회성 보정: 휴일의 '석근 13~21' → 공휴일석근 15~21, 시간 없는 '석5' → 석5/공휴일석5.
+// 서버 근무표를 받은 뒤에 돌린다(옛 사본을 고치지 않도록). 수동 입력 값은 제외. 바뀐 날짜만 칸 단위 PATCH(멱등).
+// 이 폰에서 한 번 끝나면 다시 돌지 않는다(MIGRATION_KEY). 다른 폰과 동시에 돌아도 같은 값을 쓰므로 안전.
+const MIGRATION_KEY = modeKey('kluvy_migration_seok_v1');
+function runSeokMigration() {
+  if (IS_PERSONAL) return; // 규호(my 칸) 교대근무 규칙 — 개인 모드는 my 칸을 쓰지 않음
+  if (localStorage.getItem(MIGRATION_KEY)) return;
+  const changed = migrateKyuhoSeokRules(state.scheduleDB);
+  if (changed.length) {
+    console.info(`석근·석5 휴일 규칙 보정: ${changed.length}일 (${changed.join(', ')})`);
+    saveDB();
+    renderCalendar();
+  }
+  safeSetStorage(MIGRATION_KEY, { at: Date.now(), count: changed.length, dates: changed });
+}
+
+// v2.5.0 미리 받기: 서버 근무표를 받은 뒤(온라인) 이번 달 + 다음 달 사진을 IndexedDB 에 받아 둔다 → 비행기모드에서도 사진 보기.
+// 근무 데이터는 동기화가 schedules 전체를 받아 localStorage 에 두므로 다음 달도 이미 들어 있다. 10분에 한 번까지, 실패는 조용히.
+function prefetchForOffline() {
+  runPrefetch({ db: state.scheduleDB, syncPhoto: syncPhotoForMonth, online: () => navigator.onLine !== false })
+    .then(r => { if (r) console.info('오프라인용 미리 받기:', JSON.stringify(r.result)); })
+    .catch(e => console.info('미리 받기 건너뜀:', e && e.message));
+}
+
+function initApp() {
+  try {
+    applyAppMode(document); // v2.6.0: <html data-app-mode> + 개인 모드 문구 (커플 모드는 속성만)
+    initYearSelector();
+    updateFbLoginUI();
+    renderCalendar();
+    updateDetailCard();
+    initApplyBar(); // v2.4.6: 10분 안의 '되돌리기' 기록이 있으면 반영 결과 바를 다시 보여 줌
+    maybeShowOnboarding(); // v2.6.0: 개인 모드 첫 실행 — 이름 입력
+  } catch (err) {
+    console.error("초기화 예외 발생:", err);
+  }
+  // 서버 동기화: 미전송 대기열 전송 + 실시간 스트림 (화면이 보이고 온라인일 때)
+  runAfterFirstFullSync(() => { runSeokMigration(); refreshFlightTimes().catch(() => {}); prefetchForOffline(); });
+  if (!getConfiguredDbUrl()) runSeokMigration(); // 서버를 안 쓰는 폰은 이 폰 사본만 보정
+  initSync();
+  // 오래 오프라인이었다가 다시 연결되면(착륙 후 등) 미리 받기를 한 번 더 (10분 간격 제한은 runPrefetch 가 지킴)
+  window.addEventListener('online', () => setTimeout(prefetchForOffline, 5000));
+  // v1 이 localStorage 에 넣어 둔 사진(base64)을 IndexedDB 로 옮기고 localStorage 에서 지운다 (한도 초과 방지)
+  migrateLocalStoragePhotos(localStorage, getPhotoBackend(), isSafeImageDataUrl)
+    .then(r => { if (r.moved.length) console.info('사진을 IndexedDB 로 옮김:', r.moved.join(', ')); })
+    .catch(e => console.warn('사진 옮기기 실패:', e));
+}
+
+loadLocalData();
+// 모듈 스크립트는 HTML 파싱이 끝난 뒤 실행되므로 바로 초기화한다.
+// (운영본은 즉시 1회 + DOMContentLoaded 1회, 총 2번 초기화했음 — 결과는 같아서 1번으로 정리)
+initApp();

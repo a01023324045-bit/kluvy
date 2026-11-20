@@ -1,5 +1,5 @@
 // Realtime DB REST 요청 공통 (주소 + ?auth= 붙이기 + 401 이면 토큰 새로 받아 한 번 더)
-import { getConfiguredDbUrl } from './config.js';
+import { getConfiguredDbUrl, IS_PERSONAL } from './config.js';
 import { getFbAuthQuery, invalidateIdToken } from './auth.js';
 
 /** 브라우저가 오프라인이라고 알려 주는가 (navigator 가 없으면 온라인으로 봄) */
@@ -32,7 +32,11 @@ export async function dbFetch(path, { method = 'GET', body, query = '' } = {}) {
     init.headers = { 'Content-Type': 'application/json' };
     init.body = typeof body === 'string' ? body : JSON.stringify(body);
   }
-  let res = await fetch(buildDbUrl(base, path, await getFbAuthQuery(), query), init);
+  const authQ = await getFbAuthQuery();
+  // v2.6.0 개인 모드: 로그인 전(토큰 없음)이면 보내지 않고 바로 401 — 내 Firebase 규칙은 로그인한 본인만 허용하므로 결과는 같고,
+  //   주소를 먼저 넣고 로그인하는 순서에서 브라우저 콘솔에 '거부' 로그가 남지 않는다. (커플 모드는 그대로 보냄)
+  if (IS_PERSONAL && !authQ) return new Response(null, { status: 401, statusText: 'login required' });
+  let res = await fetch(buildDbUrl(base, path, authQ, query), init);
   if (res.status === 401) {
     invalidateIdToken();
     const q2 = await getFbAuthQuery({ forceRefresh: true });

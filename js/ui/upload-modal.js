@@ -3,7 +3,12 @@
 //         화면 아래에 결과 한 줄 요약 + [되돌리기](10분)를 보여 준다. 미리보기(체크박스·편명 수정)는 [결과 먼저 보기] 로만 연다.
 //         업로드는 자기 칸(규호 my / 예진 gf)만 바꾸고, 직접 입력(✋)·빈칸·같은 값·date·약속·상대 칸은 건드리지 않는다.
 //         예진 사진은 반영할 때 한 번만 업로드한다.
-import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, GEMINI_MODEL, APP_VERSION } from '../config.js';
+import { DEFAULT_FIREBASE_URL, STORAGE_KEYS, GEMINI_MODEL, APP_VERSION, APP_VERSION_NUMBER, APP_CACHE_PREFIX, APP_CACHE_NAME, IS_PERSONAL, isOwnAppCache } from '../config.js';
+import { fillPersonalSettings } from './personal.js';
+
+// v2.6.0: 사진 칸(gf) 이름 — 커플 '예진', 개인 '내 근무표'
+const Y_PHOTO = IS_PERSONAL ? '근무표 사진' : '예진 사진';
+const Y_SCHED = IS_PERSONAL ? '내 근무표' : '예진 스케줄';
 import { state } from '../state.js';
 import { makeDateKey, makeMonthKey } from '../dates.js';
 import { safeSetStorage } from '../storage.js';
@@ -176,6 +181,7 @@ export function openUploadModalForCurrentMonth() {
   if (ping) { ping.textContent = ''; ping.className = 'help'; delete ping.dataset.ok; }
   const alUsage = document.getElementById('airlabsUsageText');
   if (alUsage) alUsage.textContent = airlabsUsageText();
+  fillPersonalSettings(); // v2.6.0 개인 모드: 내 이름·웹 API 키 칸 (커플 모드는 아무것도 안 함)
 
   document.getElementById('uploadModal').classList.remove('hidden');
 }
@@ -564,8 +570,8 @@ export async function processUploadFiles(opts) {
     }
     // 4) 예진 스케줄 사진
     if (yFile) {
-      await guard('예진 사진', async () => {
-        setProgress(55, `${getGeminiModel()} 예진 스케줄 출퇴근 정밀 판독 중...`);
+      await guard(Y_PHOTO, async () => {
+        setProgress(55, IS_PERSONAL ? `${getGeminiModel()} 내 근무표 출퇴근 정밀 판독 중...` : `${getGeminiModel()} 예진 스케줄 출퇴근 정밀 판독 중...`);
         const compressed = await compressImageFile(yFile);
         const b64 = await readFileAsBase64(yFile);
         const r = await recognizeYejinImage(b64, yFile.type || 'image/jpeg', apiKey, { onStatus });
@@ -573,13 +579,13 @@ export async function processUploadFiles(opts) {
         const built = buildYejinPreviewRows(r.parsed, targetY, targetM);
         compressedYejin = compressed;
         yejinMonth = { year: built.year, month: built.month };
-        if (!built.rows.length) warn('예진 사진에서 일정을 못 찾음', '예진 스케줄 사진에서 일정을 찾지 못했습니다.');
+        if (!built.rows.length) warn(`${Y_PHOTO}에서 일정을 못 찾음`, `${Y_SCHED} 사진에서 일정을 찾지 못했습니다.`);
         rows.push(...built.rows.map(x => ({ ...x, source: 'photo' })));
-        sources.push(`예진 사진: ${yFile.name}`);
+        sources.push(`${Y_PHOTO}: ${yFile.name}`);
       });
     }
     if (kIsImage || yFile) setProgress(100, preview ? '분석 완료! 미리보기를 엽니다.' : '분석 완료! 반영합니다.');
-    for (const [who, mm] of [['규호 근무표', kIsImage ? kyuhoMonth : null], ['예진 스케줄', yejinMonth]]) {
+    for (const [who, mm] of [['규호 근무표', kIsImage ? kyuhoMonth : null], [Y_SCHED, yejinMonth]]) {
       if (mm && (mm.year !== targetY || mm.month !== targetM)) warn(`${who} 사진의 달(${mm.month}월)로 반영`, `${who} 사진에서 읽은 달(${mm.year}년 ${mm.month}월)이 선택한 달(${targetM}월)과 달라 사진의 달로 반영합니다.`);
     }
     const modelInput = document.getElementById('geminiModel');
@@ -639,20 +645,21 @@ export async function renderAppVersion() {
   // 캐시 조회(비동기) 전에 버전을 먼저 보여 줘 '확인 중…'에 멈춰 보이지 않게 한다
   const el = el0;
   if (!el) return;
-  el.textContent = `앱 버전 v${APP_VERSION}`;
+  const label = IS_PERSONAL ? `내 스케줄 앱 v${APP_VERSION_NUMBER}` : `앱 버전 v${APP_VERSION_NUMBER}`;
+  el.textContent = label;
   el.className = 'help !mt-0';
-  let cache = '';
+  let cacheName = '';
   try {
     const keys = await caches.keys();
-    // 앱 파일 캐시(kluvy-v2.5.0)만 본다 — CDN 아이콘·엑셀 라이브러리 캐시(kluvy-cdn-…)는 버전과 무관
-    cache = (keys.find(k => /^kluvy-v\d/.test(k)) || '').replace('kluvy-', '');
+    // 이 모드의 앱 파일 캐시(커플 kluvy-v2.6.0 / 개인 kluvy-personal-v2.6.0)만 본다 — CDN 캐시(kluvy-cdn-…)·다른 모드 캐시는 버전과 무관
+    cacheName = keys.find(k => k.startsWith(APP_CACHE_PREFIX) && /^\d/.test(k.slice(APP_CACHE_PREFIX.length))) || '';
   } catch (e) { /* caches 없음 */ }
   // index.html 에 적힌 버전과 이 파일(config.js)의 버전이 다르면 일부 파일만 올라간 상태다.
   const metaVer = (document.querySelector('meta[name="kluvy-version"]') || {}).content || '';
   const problems = [];
   if (metaVer && metaVer !== APP_VERSION) problems.push(`화면 파일 v${metaVer}`);
-  if (cache && cache !== 'v' + APP_VERSION) problems.push(`저장된 화면 ${cache}`);
-  el.textContent = `앱 버전 v${APP_VERSION}` + (problems.length ? ` · 예전 파일 있음(${problems.join(', ')}) → [업데이트 확인]` : '');
+  if (cacheName && cacheName !== APP_CACHE_NAME) problems.push(`저장된 화면 ${cacheName.replace('kluvy-', '')}`);
+  el.textContent = label + (problems.length ? ` · 예전 파일 있음(${problems.join(', ')}) → [업데이트 확인]` : '');
   el.className = problems.length ? 'help !mt-0 !text-amber-700 font-bold' : 'help !mt-0';
 }
 
@@ -668,7 +675,8 @@ export async function checkForUpdate() {
       if (reg) await reg.update();
     }
     const keys = await caches.keys();
-    await Promise.all(keys.map(k => caches.delete(k)));
+    // v2.6.0: 같은 주소의 다른 모드 앱(커플 /kluvy/ ↔ 개인 /kluvy/personal/) 캐시는 지우지 않는다
+    await Promise.all(keys.filter(isOwnAppCache).map(k => caches.delete(k)));
   } catch (e) { console.warn('업데이트 확인 실패:', e); }
   location.reload();
 }

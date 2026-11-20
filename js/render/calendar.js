@@ -17,6 +17,7 @@ import { getAnniversaryInfo } from '../anniversary.js';
 import { renderFlightBox } from '../ui/flight-card.js';
 import { flightsText } from '../flight.js';
 import { detailTitleParts, cellTooltip, dutyExtrasLines, cellExtraMark } from '../title-format.js';
+import { LAYOUT, personName, captureFileName } from '../app-mode.js';
 
 // 4글자 이상(예: 비슈케크·타이베이)은 좁은 칸에서 '…'으로 잘리지 않게 자간·여백을 줄인다 (app.css .duty--long)
 function longLabelClass(label) {
@@ -59,6 +60,7 @@ export function gfCellLabel(g) {
 }
 
 export function updateDDayHeader() {
+  if (!LAYOUT.showDday) return; // v2.6.0 개인 모드: 만난 날 D-Day 없음 (배지는 data-couple-only 로 숨김)
   const dDayEl = document.getElementById('dDayBadge');
   if (!dDayEl) return;
   const today = getKSTDate();
@@ -111,7 +113,8 @@ export function updateDetailCard() {
     if (selectedDateKey === todayKey()) tagsBox.appendChild(el('span', 'text-[12px] bg-indigo-50 text-indigo-800 border border-indigo-200 font-semibold px-2 py-0.5 rounded-md', '오늘'));
   }
 
-  const wrapKyuho = document.getElementById('timelineWrapKyuho');
+  // v2.6.0 개인 모드: 한 사람(gf 칸) 카드만 — 규호 카드는 그리지 않음 (data-couple-only 로 숨김)
+  const wrapKyuho = LAYOUT.personSlots.includes('my') ? document.getElementById('timelineWrapKyuho') : null;
   if (wrapKyuho) {
     wrapKyuho.classList.remove('hidden');
     const myBar = document.getElementById('detailMyBar');
@@ -169,7 +172,7 @@ export function updateDetailCard() {
   const flightBox = document.getElementById('detailFlightBox');
   if (flightBox) renderFlightBox(flightBox, selectedDateKey, dayData.gf);
 
-  const planBox = document.getElementById('datePlanBox');
+  const planBox = LAYOUT.showDatePlan ? document.getElementById('datePlanBox') : null;
   const planTime = document.getElementById('datePlanTime');
   const planNote = document.getElementById('datePlanNote');
   if (planBox && planTime && planNote) {
@@ -266,9 +269,9 @@ export function renderCalendar() {
     top.appendChild(daySpan);
     const icons = el('div', 'cal-icons');
     if (aniv) icons.appendChild(el('i', 'fa-solid fa-star text-amber-500'));
-    if (dayData.date) icons.appendChild(el('i', 'fa-solid fa-heart text-rose-600'));
-    if (dayData.myPromise) { const d = el('i', 'dot dot--k'); d.title = '규호 일정'; icons.appendChild(d); }
-    if (dayData.gfPromise) { const d = el('i', 'dot dot--y'); d.title = '예진 일정'; icons.appendChild(d); }
+    if (dayData.date && LAYOUT.showDatePlan) icons.appendChild(el('i', 'fa-solid fa-heart text-rose-600'));
+    if (dayData.myPromise && LAYOUT.personSlots.includes('my')) { const d = el('i', 'dot dot--k'); d.title = `${personName('my')} 일정`; icons.appendChild(d); }
+    if (dayData.gfPromise) { const d = el('i', 'dot dot--y'); d.title = `${personName('gf')} 일정`; icons.appendChild(d); }
     top.appendChild(icons);
     cell.appendChild(top);
 
@@ -364,6 +367,7 @@ export function toggleAnniversaryDisplay() {
 }
 
 export function toggleScheduleFilter(target) {
+  if (!LAYOUT.showPersonFilters) return; // v2.6.0 개인 모드: 한 사람뿐이라 보기 토글 없음
   if (target === 'kyuho') state.showKyuho = !state.showKyuho;
   else if (target === 'yejin') state.showYejin = !state.showYejin;
   paintFilterButtons();
@@ -592,7 +596,7 @@ export async function captureCalendar() {
   try {
     const imageURL = await renderCalendarImage(target);
     const downloadLink = document.createElement('a');
-    downloadLink.download = `규호♥예진_근무표_${state.currentYear}년_${String(state.currentMonth).padStart(2, '0')}월.png`;
+    downloadLink.download = captureFileName(state.currentYear, state.currentMonth);
     downloadLink.href = imageURL;
     document.body.appendChild(downloadLink);
     downloadLink.click();
