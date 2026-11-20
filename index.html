@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="kluvy-version" content="2.6.0" />
+  <meta name="kluvy-version" content="2.6.1" />
   <title>KLUVY - 규호♥예진 근무표 & 데이트 플래너</title>
 
   <!-- PWA 홈 화면 및 단독 앱(Standalone) 설정 -->
@@ -15,6 +15,29 @@
   <!-- 탭 아이콘도 앱 안 파일로 (없으면 브라우저가 /favicon.ico 를 찾다가 오프라인에서 실패 로그를 남김) -->
   <link rel="icon" type="image/png" href="icon-512.png" />
   <link rel="manifest" href="manifest.json" />
+
+  <!-- 파일을 직접 열면(file://) 브라우저가 ES 모듈을 막아 화면이 멈춘다 → 원인을 바로 알려 준다 -->
+  <script>
+    if (location.protocol === 'file:') {
+      document.addEventListener('DOMContentLoaded', function () {
+        var box = document.createElement('div');
+        box.id = 'fileProtoNotice';
+        box.setAttribute('style', 'position:fixed;inset:0;z-index:99999;background:#fff;color:#0f172a;font-family:Pretendard,system-ui,sans-serif;padding:26px 22px;line-height:1.7;overflow:auto');
+        box.innerHTML = ''
+          + '<h2 style="font-size:19px;font-weight:700;margin:0 0 10px">이 파일을 직접 열면 동작하지 않습니다</h2>'
+          + '<p style="margin:0 0 14px;color:#475569">파일을 더블클릭하면 주소가 <b>file://</b> 이 되어 앱 스크립트가 차단됩니다. (그래서 「동기화 확인 중」에서 멈춤)</p>'
+          + '<p style="margin:0 0 6px;font-weight:700">방법 1 · 가장 쉬움</p>'
+          + '<p style="margin:0 0 14px">KLUVY-v2 폴더의 <b>start-local.bat</b> 을 더블클릭 → 브라우저가 자동으로 열립니다.</p>'
+          + '<p style="margin:0 0 6px;font-weight:700">방법 2 · 명령으로</p>'
+          + '<pre style="background:#f1f5f9;padding:10px;border-radius:8px;font-size:12px;overflow:auto;margin:0 0 14px">cd C:\\Users\\User\\Desktop\\KLUVY-v2\nnode tools/serve.js --port 8781</pre>'
+          + '<p style="margin:0 0 14px">그다음 <b>http://127.0.0.1:8781/app/index.html</b> 을 엽니다.</p>'
+          + '<p style="margin:0;color:#64748b;font-size:13px">실제 폰·PC 에서 쓰는 주소는 https://a01023324045-bit.github.io/kluvy/ 입니다.</p>';
+        document.body.appendChild(box);
+        var badge = document.getElementById('syncStatusBadge');
+        if (badge) badge.textContent = '로컬 파일(file://)로 열림';
+      });
+    }
+  </script>
 
   <!-- 서비스 워커 등록 스크립트 -->
   <script>

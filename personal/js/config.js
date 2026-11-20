@@ -140,7 +140,7 @@ export function getGeminiModelsEndpoint(apiKey) {
 }
 
 /** 화면에 보여 줄 앱 버전 (sw.js CACHE_VERSION 과 함께 표시). 개인 모드 사본은 build:personal 이 'kluvy-personal-v2.6.0' 형식으로 바꾼다 */
-export const APP_VERSION = 'kluvy-personal-v2.6.0';
+export const APP_VERSION = 'kluvy-personal-v2.6.1';
 /** 숫자만 (2.6.0) — 화면 표시용 */
 export const APP_VERSION_NUMBER = APP_VERSION.replace(/^kluvy-personal-v/, '');
 /** 이 모드의 앱 파일 캐시 이름 (sw.js CACHE_VERSION 과 같아야 함): 커플 'kluvy-v2.6.0' / 개인 'kluvy-personal-v2.6.0' */
